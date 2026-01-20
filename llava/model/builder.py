@@ -23,7 +23,7 @@ from llava.model import *
 from llava.constants import DEFAULT_POINT_PATCH_TOKEN, DEFAULT_PT_START_TOKEN, DEFAULT_PT_END_TOKEN
 
 
-def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", device="cuda"):
+def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", device="cuda", torch_dtype=torch.bfloat16):
     kwargs = {"device_map": device_map}
 
     if load_8bit:
@@ -37,7 +37,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             bnb_4bit_quant_type='nf4'
         )
     else:
-        kwargs['torch_dtype'] = torch.float16
+        kwargs['torch_dtype'] = torch_dtype
 
     # Load LLaVA model
     if 'lora' in model_name.lower() and model_base is None:
@@ -91,7 +91,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             model = LlavaLlamaForCausalLM.from_pretrained(model_base, low_cpu_mem_usage=True, config=cfg_pretrained, **kwargs)
 
         mm_projector_weights = torch.load(os.path.join(model_path, 'mm_projector.bin'), map_location='cpu')
-        mm_projector_weights = {k: v.to(torch.float16) for k, v in mm_projector_weights.items()}
+        mm_projector_weights = {k: v.to(torch_dtype) for k, v in mm_projector_weights.items()}
         model.load_state_dict(mm_projector_weights, strict=False)
     else:
         tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
@@ -110,11 +110,11 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         vision_tower.load_model()
 
     # Move both vision_tower and its model to the same device
-    vision_tower.to(device=device, dtype=torch.float16)
+    vision_tower.to(device=device, dtype=torch_dtype)
 
     if hasattr(vision_tower, "model"):
-        vision_tower.model = vision_tower.model.to(device=device, dtype=torch.float16)
-        print(f"[INFO] vision_tower.model moved to {device}")
+        vision_tower.model = vision_tower.model.to(device=device, dtype=torch_dtype)
+        print(f"[INFO] vision_tower.model moved to {device} with dtype {torch_dtype}")
 
 
     if hasattr(model.config, "max_sequence_length"):

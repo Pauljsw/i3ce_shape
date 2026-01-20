@@ -99,19 +99,18 @@ class LlavaMetaForCausalLM(ABC):
         return self.get_model().get_vision_tower()
 
     def encode_points(self, points):
-        print("🌐 [DEBUG] encode_points() called")
-        print(f" - points.device: {points.device}")
-
         # Vision Tower 호출
         pos_features, local_features, global_features = self.get_model().get_vision_tower()(points)
 
-        print(f" - pos_features.device: {pos_features.device}")
-        print(f" - local_features.device: {local_features.device}")
-        print(f" - global_features.device: {global_features.device}")
+        # Safety check: Convert vision tower outputs to bfloat16 if needed
+        # This ensures consistency with training dtype (--bf16 True)
+        if pos_features.dtype != torch.bfloat16:
+            pos_features = pos_features.to(torch.bfloat16)
+            local_features = local_features.to(torch.bfloat16)
+            global_features = global_features.to(torch.bfloat16)
 
-        # mm_projector (아마 linear projection 등일 것)
+        # mm_projector (multimodal projection)
         point_features = self.get_model().mm_projector(pos_features, local_features, global_features)
-        print(f" - point_features.device (after mm_projector): {point_features.device}")
 
         return point_features
 
