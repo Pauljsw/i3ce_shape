@@ -291,8 +291,8 @@ def generate_missing_dataset(
             if not convs or len(convs) < 2:
                 continue
                 
-            # Extract question text (KEEP <point> token for model inference!)
-            question_text = convs[0]['value'].strip()
+            # Extract question text (REMOVE <point> token - inference code adds it automatically)
+            question_text = convs[0]['value'].replace('<point>\n', '').strip()
             # Extract full answer text (Template-Guided format with Expected vs Actual)
             answer_text = convs[1]['value']
 
