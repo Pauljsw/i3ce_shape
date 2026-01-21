@@ -92,7 +92,7 @@ def generate_missing_dataset(
     os.makedirs(pcs_dir, exist_ok=True)
 
     scene_records: List[Dict[str, Any]] = []
-    generator = EnhancedScaffoldGeneratorFinal(random_seed=None)
+    generator = EnhancedScaffoldGeneratorFinal(random_seed=42)  # Fixed seed for reproducibility
 
     print(f"🏗️ Generating {num_scenes} scaffold scenes with FIXED bbox normalization...")
     print(f"📊 Missing quota: {generator.missing_quota} components max per scene")
