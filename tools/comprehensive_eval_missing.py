@@ -1,0 +1,659 @@
+#!/usr/bin/env python3
+"""
+Comprehensive Evaluation for Scaffold Missing Detection
+Evaluates all 6 tasks with detailed metrics
+"""
+
+import os
+import re
+import json
+import argparse
+import numpy as np
+from collections import defaultdict
+from typing import List, Dict, Tuple, Optional
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+
+
+class ComprehensiveMissingEvaluator:
+    """Comprehensive evaluator for all missing detection tasks"""
+
+    def __init__(self, gt_file: str, pred_file: str):
+        """Initialize evaluator with GT and prediction files"""
+        self.gt_data = self.load_jsonl(gt_file)
+        self.pred_data = self.load_jsonl(pred_file)
+
+        # Match by question_id
+        self.matched_pairs = self.match_predictions()
+
+        print(f"✅ Loaded {len(self.gt_data)} GT samples")
+        print(f"✅ Loaded {len(self.pred_data)} predictions")
+        print(f"✅ Matched {len(self.matched_pairs)} pairs")
+
+    def load_jsonl(self, file_path: str) -> List[Dict]:
+        """Load JSONL file"""
+        data = []
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                data.append(json.loads(line))
+        return data
+
+    def match_predictions(self) -> List[Tuple[Dict, Dict]]:
+        """Match GT and predictions by question_id"""
+        pred_dict = {item['question_id']: item for item in self.pred_data}
+
+        matched = []
+        for gt in self.gt_data:
+            qid = gt['question_id']
+            if qid in pred_dict:
+                matched.append((gt, pred_dict[qid]))
+            else:
+                print(f"⚠️ Warning: No prediction for {qid}")
+
+        return matched
+
+    # ============================================================
+    # Task 1: Binary Classification
+    # ============================================================
+
+    def eval_binary_classification(self) -> Dict:
+        """Evaluate binary classification (missing yes/no)"""
+        print("\n" + "="*60)
+        print("TASK 1: BINARY CLASSIFICATION (Missing Yes/No)")
+        print("="*60)
+
+        y_true = []
+        y_pred = []
+
+        for gt, pred in self.matched_pairs:
+            # GT label
+            gt_label = gt.get('label', gt.get('text', '')).strip().lower()
+            gt_binary = 1 if gt_label in ['yes', 'y', 'true'] else 0
+
+            # Predicted label
+            pred_text = pred.get('text', '').strip().lower()
+            # Simple heuristic: if mentions "missing" and not "no missing"
+            if 'no missing' in pred_text or 'not missing' in pred_text:
+                pred_binary = 0
+            elif 'missing' in pred_text:
+                pred_binary = 1
+            else:
+                pred_binary = 0
+
+            y_true.append(gt_binary)
+            y_pred.append(pred_binary)
+
+        # Calculate metrics
+        accuracy = accuracy_score(y_true, y_pred)
+        precision, recall, f1, support = precision_recall_fscore_support(
+            y_true, y_pred, average=None, labels=[0, 1]
+        )
+
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+
+        results = {
+            'accuracy': float(accuracy),
+            'precision_no': float(precision[0]),
+            'recall_no': float(recall[0]),
+            'f1_no': float(f1[0]),
+            'support_no': int(support[0]),
+            'precision_yes': float(precision[1]),
+            'recall_yes': float(recall[1]),
+            'f1_yes': float(f1[1]),
+            'support_yes': int(support[1]),
+            'confusion_matrix': cm.tolist()
+        }
+
+        # Print results
+        print(f"\n📊 Overall Accuracy: {accuracy*100:.2f}%")
+        print(f"\n🔴 Class 'No Missing':")
+        print(f"   Precision: {precision[0]*100:.2f}%")
+        print(f"   Recall:    {recall[0]*100:.2f}%")
+        print(f"   F1-Score:  {f1[0]*100:.2f}%")
+        print(f"   Support:   {support[0]}")
+        print(f"\n🟢 Class 'Yes Missing':")
+        print(f"   Precision: {precision[1]*100:.2f}%")
+        print(f"   Recall:    {recall[1]*100:.2f}%")
+        print(f"   F1-Score:  {f1[1]*100:.2f}%")
+        print(f"   Support:   {support[1]}")
+        print(f"\n📈 Confusion Matrix:")
+        print(f"   Predicted →    No   Yes")
+        print(f"   Actual ↓")
+        print(f"   No           {cm[0][0]:4d} {cm[0][1]:4d}")
+        print(f"   Yes          {cm[1][0]:4d} {cm[1][1]:4d}")
+
+        return results
+
+    # ============================================================
+    # Task 2: Component Type Classification
+    # ============================================================
+
+    def extract_component_types(self, text: str) -> List[str]:
+        """Extract mentioned component types from text"""
+        text_lower = text.lower()
+        types = []
+
+        if 'vertical' in text_lower or 'post' in text_lower:
+            types.append('vertical')
+        if 'horizontal' in text_lower or 'beam' in text_lower:
+            types.append('horizontal')
+        if 'platform' in text_lower:
+            types.append('platform')
+
+        return types
+
+    def eval_component_type(self) -> Dict:
+        """Evaluate component type classification"""
+        print("\n" + "="*60)
+        print("TASK 2: COMPONENT TYPE CLASSIFICATION")
+        print("="*60)
+
+        type_metrics = defaultdict(lambda: {'tp': 0, 'fp': 0, 'fn': 0})
+
+        for gt, pred in self.matched_pairs:
+            # Extract GT types from missing components
+            gt_types = set()
+            for bbox_data in gt.get('bboxes', []):
+                # If bboxes is list of bboxes, need to check metadata
+                # For now, extract from GT text
+                pass
+
+            # Simpler: extract from GT text
+            gt_text = gt.get('text', '')
+            gt_types = set(self.extract_component_types(gt_text))
+
+            # Extract predicted types
+            pred_text = pred.get('text', '')
+            pred_types = set(self.extract_component_types(pred_text))
+
+            # Calculate TP, FP, FN for each type
+            for ctype in ['vertical', 'horizontal', 'platform']:
+                if ctype in gt_types and ctype in pred_types:
+                    type_metrics[ctype]['tp'] += 1
+                elif ctype not in gt_types and ctype in pred_types:
+                    type_metrics[ctype]['fp'] += 1
+                elif ctype in gt_types and ctype not in pred_types:
+                    type_metrics[ctype]['fn'] += 1
+
+        # Calculate metrics
+        results = {}
+        f1_scores = []
+
+        print()
+        for ctype in ['vertical', 'horizontal', 'platform']:
+            tp = type_metrics[ctype]['tp']
+            fp = type_metrics[ctype]['fp']
+            fn = type_metrics[ctype]['fn']
+
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+            results[ctype] = {
+                'precision': float(precision),
+                'recall': float(recall),
+                'f1': float(f1),
+                'tp': tp, 'fp': fp, 'fn': fn
+            }
+
+            f1_scores.append(f1)
+
+            print(f"📊 {ctype.capitalize()}:")
+            print(f"   Precision: {precision*100:.2f}%")
+            print(f"   Recall:    {recall*100:.2f}%")
+            print(f"   F1-Score:  {f1*100:.2f}%")
+            print(f"   (TP={tp}, FP={fp}, FN={fn})")
+
+        macro_f1 = np.mean(f1_scores)
+        results['macro_f1'] = float(macro_f1)
+        print(f"\n🎯 Macro-averaged F1: {macro_f1*100:.2f}%")
+
+        return results
+
+    # ============================================================
+    # Task 3: BBox Grounding (Most Important!)
+    # ============================================================
+
+    def extract_bboxes_from_text(self, text: str) -> List[List[List[float]]]:
+        """Extract 8-corner bboxes from text using regex"""
+        # Pattern: [[x,y,z], [x,y,z], ...]
+        # Look for nested lists
+        pattern = r'\[\s*\[\s*[-\d.]+\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\](?:\s*,\s*\[\s*[-\d.]+\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\])*\s*\]'
+
+        matches = re.findall(pattern, text)
+
+        bboxes = []
+        for match in matches:
+            try:
+                bbox = eval(match)  # Parse as Python list
+                if isinstance(bbox, list) and len(bbox) == 8:
+                    # Validate it's 8 corners with 3D coordinates
+                    if all(isinstance(corner, list) and len(corner) == 3 for corner in bbox):
+                        bboxes.append(bbox)
+            except:
+                continue
+
+        return bboxes
+
+    def calculate_iou_3d(self, bbox1: List[List[float]], bbox2: List[List[float]]) -> float:
+        """Calculate 3D IoU between two 8-corner bboxes"""
+        try:
+            # Convert to numpy arrays
+            bbox1_array = np.array(bbox1, dtype=np.float32)
+            bbox2_array = np.array(bbox2, dtype=np.float32)
+
+            # Get min/max corners
+            min1 = bbox1_array.min(axis=0)
+            max1 = bbox1_array.max(axis=0)
+            min2 = bbox2_array.min(axis=0)
+            max2 = bbox2_array.max(axis=0)
+
+            # Calculate intersection
+            inter_min = np.maximum(min1, min2)
+            inter_max = np.minimum(max1, max2)
+            inter_dims = np.maximum(0, inter_max - inter_min)
+            inter_volume = np.prod(inter_dims)
+
+            # Calculate union
+            vol1 = np.prod(max1 - min1)
+            vol2 = np.prod(max2 - min2)
+            union_volume = vol1 + vol2 - inter_volume
+
+            # IoU
+            iou = inter_volume / (union_volume + 1e-8)
+            return float(iou)
+        except:
+            return 0.0
+
+    def eval_bbox_grounding(self) -> Dict:
+        """Evaluate 3D bounding box grounding"""
+        print("\n" + "="*60)
+        print("TASK 3: 3D BOUNDING BOX GROUNDING")
+        print("="*60)
+
+        all_ious = []
+        detected_count = 0
+        total_gt_bboxes = 0
+
+        iou_thresholds = [0.25, 0.5, 0.75]
+        precision_at_iou = {th: 0 for th in iou_thresholds}
+
+        for gt, pred in self.matched_pairs:
+            gt_bboxes = gt.get('bboxes', [])
+            if not gt_bboxes:
+                continue
+
+            total_gt_bboxes += len(gt_bboxes)
+
+            # Extract predicted bboxes from text
+            pred_text = pred.get('text', '')
+            pred_bboxes = self.extract_bboxes_from_text(pred_text)
+
+            if pred_bboxes:
+                detected_count += 1
+
+            # Match GT and Pred bboxes (greedy matching)
+            for gt_bbox in gt_bboxes:
+                if not pred_bboxes:
+                    all_ious.append(0.0)
+                    continue
+
+                # Find best matching pred bbox
+                best_iou = 0.0
+                for pred_bbox in pred_bboxes:
+                    iou = self.calculate_iou_3d(gt_bbox, pred_bbox)
+                    best_iou = max(best_iou, iou)
+
+                all_ious.append(best_iou)
+
+                # Count for precision@IoU
+                for th in iou_thresholds:
+                    if best_iou >= th:
+                        precision_at_iou[th] += 1
+
+        # Calculate metrics
+        mean_iou = np.mean(all_ious) if all_ious else 0.0
+        median_iou = np.median(all_ious) if all_ious else 0.0
+        detection_rate = detected_count / len(self.matched_pairs) if self.matched_pairs else 0.0
+
+        results = {
+            'mean_iou': float(mean_iou),
+            'median_iou': float(median_iou),
+            'detection_rate': float(detection_rate),
+            'total_gt_bboxes': total_gt_bboxes,
+            'detected_samples': detected_count
+        }
+
+        for th in iou_thresholds:
+            prec = precision_at_iou[th] / total_gt_bboxes if total_gt_bboxes > 0 else 0.0
+            results[f'precision@{th}'] = float(prec)
+
+        # Print results
+        print(f"\n📊 BBox Detection Rate: {detection_rate*100:.2f}%")
+        print(f"   ({detected_count}/{len(self.matched_pairs)} samples had predicted bboxes)")
+        print(f"\n📏 IoU Statistics:")
+        print(f"   Mean IoU:   {mean_iou:.4f}")
+        print(f"   Median IoU: {median_iou:.4f}")
+        print(f"\n🎯 Precision @ IoU Threshold:")
+        for th in iou_thresholds:
+            prec = results[f'precision@{th}']
+            print(f"   IoU ≥ {th}: {prec*100:.2f}%")
+
+        return results
+
+    # ============================================================
+    # Task 4: Counting Accuracy
+    # ============================================================
+
+    def extract_count(self, text: str) -> int:
+        """Extract number of missing components from text"""
+        # Pattern 1: "X components are missing" or "Missing: X"
+        patterns = [
+            r'(\d+)\s+components?\s+(?:are\s+)?missing',
+            r'missing:\s*(\d+)',
+            r'total:\s*(\d+)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text.lower())
+            if match:
+                return int(match.group(1))
+
+        # Fallback: count bullet points with component descriptions
+        count = text.count('- ') + text.count('• ')
+        # Only count if there are actual component mentions
+        if count > 0 and any(kw in text.lower() for kw in ['vertical', 'horizontal', 'platform']):
+            return count
+
+        return 0
+
+    def eval_counting(self) -> Dict:
+        """Evaluate counting accuracy"""
+        print("\n" + "="*60)
+        print("TASK 4: COUNTING ACCURACY")
+        print("="*60)
+
+        errors = []
+        exact_matches = 0
+        within_1 = 0
+
+        for gt, pred in self.matched_pairs:
+            # GT count from bboxes
+            gt_count = len(gt.get('bboxes', []))
+
+            # Predicted count from text
+            pred_text = pred.get('text', '')
+            pred_count = self.extract_count(pred_text)
+
+            error = abs(gt_count - pred_count)
+            errors.append(error)
+
+            if error == 0:
+                exact_matches += 1
+            if error <= 1:
+                within_1 += 1
+
+        mae = np.mean(errors) if errors else 0.0
+        exact_match_rate = exact_matches / len(errors) if errors else 0.0
+        within_1_rate = within_1 / len(errors) if errors else 0.0
+
+        # Error distribution
+        error_dist = defaultdict(int)
+        for e in errors:
+            if e >= 3:
+                error_dist['3+'] += 1
+            else:
+                error_dist[e] += 1
+
+        results = {
+            'mae': float(mae),
+            'exact_match_rate': float(exact_match_rate),
+            'within_1_rate': float(within_1_rate),
+            'error_distribution': dict(error_dist)
+        }
+
+        print(f"\n📊 Mean Absolute Error (MAE): {mae:.3f}")
+        print(f"📊 Exact Match Rate: {exact_match_rate*100:.2f}%")
+        print(f"📊 Within ±1: {within_1_rate*100:.2f}%")
+        print(f"\n📈 Error Distribution:")
+        total = len(errors)
+        for error_val in sorted([k for k in error_dist.keys() if k != '3+']):
+            count = error_dist[error_val]
+            print(f"   Error={error_val}: {count:4d} ({count/total*100:5.1f}%)")
+        if '3+' in error_dist:
+            count = error_dist['3+']
+            print(f"   Error≥3:  {count:4d} ({count/total*100:5.1f}%)")
+
+        return results
+
+    # ============================================================
+    # Task 5: Spatial Reasoning
+    # ============================================================
+
+    def extract_question_type(self, question_id: str) -> Tuple[str, Optional[int]]:
+        """Extract question type and target (floor/bay) from question_id"""
+        # Pattern: scaffold_XXXXX_missing_TYPE_TARGET
+        if '_floor_' in question_id:
+            match = re.search(r'_floor_(\d+)', question_id)
+            floor = int(match.group(1)) if match else None
+            return ('floor', floor)
+        elif '_bay_' in question_id:
+            match = re.search(r'_bay_(\d+)', question_id)
+            bay = int(match.group(1)) if match else None
+            return ('bay', bay)
+        else:
+            return ('general', None)
+
+    def eval_spatial_reasoning(self) -> Dict:
+        """Evaluate spatial reasoning (floor/bay specific questions)"""
+        print("\n" + "="*60)
+        print("TASK 5: SPATIAL REASONING")
+        print("="*60)
+
+        floor_metrics = defaultdict(lambda: {'correct': 0, 'total': 0})
+        bay_metrics = defaultdict(lambda: {'correct': 0, 'total': 0})
+
+        for gt, pred in self.matched_pairs:
+            qid = gt['question_id']
+            qtype, target = self.extract_question_type(qid)
+
+            if qtype not in ['floor', 'bay']:
+                continue
+
+            # Simple correctness check: does prediction mention the target?
+            gt_label = gt.get('label', '').lower()
+            pred_text = pred.get('text', '').lower()
+
+            # Check if answer is correct based on GT label
+            if gt_label == 'yes':
+                correct = 'yes' in pred_text or 'missing' in pred_text
+            else:
+                correct = 'no' in pred_text or 'not' in pred_text or 'no missing' in pred_text
+
+            if qtype == 'floor':
+                floor_metrics[target]['correct'] += int(correct)
+                floor_metrics[target]['total'] += 1
+            elif qtype == 'bay':
+                bay_metrics[target]['correct'] += int(correct)
+                bay_metrics[target]['total'] += 1
+
+        results = {'floor': {}, 'bay': {}}
+
+        print("\n📊 Floor-specific Questions:")
+        for floor in sorted(floor_metrics.keys()):
+            metrics = floor_metrics[floor]
+            acc = metrics['correct'] / metrics['total'] if metrics['total'] > 0 else 0.0
+            results['floor'][floor] = float(acc)
+            print(f"   Floor {floor}: {acc*100:.2f}% ({metrics['correct']}/{metrics['total']})")
+
+        print("\n📊 Bay-specific Questions:")
+        for bay in sorted(bay_metrics.keys()):
+            metrics = bay_metrics[bay]
+            acc = metrics['correct'] / metrics['total'] if metrics['total'] > 0 else 0.0
+            results['bay'][bay] = float(acc)
+            print(f"   Bay {bay}: {acc*100:.2f}% ({metrics['correct']}/{metrics['total']})")
+
+        # Overall spatial accuracy
+        total_correct = sum(m['correct'] for m in floor_metrics.values()) + \
+                       sum(m['correct'] for m in bay_metrics.values())
+        total_count = sum(m['total'] for m in floor_metrics.values()) + \
+                     sum(m['total'] for m in bay_metrics.values())
+
+        overall_acc = total_correct / total_count if total_count > 0 else 0.0
+        results['overall_accuracy'] = float(overall_acc)
+        print(f"\n🎯 Overall Spatial Accuracy: {overall_acc*100:.2f}%")
+
+        return results
+
+    # ============================================================
+    # Task 6: Template-Guided Format Validation
+    # ============================================================
+
+    def validate_template_format(self, text: str) -> Dict[str, bool]:
+        """Check if answer follows Expected vs Actual template"""
+        text_lower = text.lower()
+
+        has_expected = 'expected' in text_lower
+        has_actual = 'actual' in text_lower
+        has_structure = any(kw in text_lower for kw in ['bay', 'row', 'floor', 'scaffold'])
+        has_bbox = '[[' in text and ']]' in text
+
+        format_correct = has_expected and has_actual
+
+        return {
+            'has_expected': has_expected,
+            'has_actual': has_actual,
+            'has_structure': has_structure,
+            'has_bbox': has_bbox,
+            'format_correct': format_correct
+        }
+
+    def eval_template_format(self) -> Dict:
+        """Evaluate template-guided format compliance"""
+        print("\n" + "="*60)
+        print("TASK 6: TEMPLATE-GUIDED FORMAT VALIDATION")
+        print("="*60)
+
+        format_stats = {
+            'has_expected': 0,
+            'has_actual': 0,
+            'has_structure': 0,
+            'has_bbox': 0,
+            'format_correct': 0
+        }
+
+        format_errors = []
+
+        for gt, pred in self.matched_pairs:
+            pred_text = pred.get('text', '')
+            validation = self.validate_template_format(pred_text)
+
+            for key in format_stats.keys():
+                if validation[key]:
+                    format_stats[key] += 1
+
+            if not validation['format_correct']:
+                format_errors.append({
+                    'question_id': pred['question_id'],
+                    'missing': [k for k, v in validation.items() if not v]
+                })
+
+        total = len(self.matched_pairs)
+        results = {k: v/total for k, v in format_stats.items()}
+        results['total_samples'] = total
+        results['error_count'] = len(format_errors)
+
+        print(f"\n📊 Format Compliance:")
+        print(f"   Has 'Expected': {format_stats['has_expected']}/{total} ({results['has_expected']*100:.1f}%)")
+        print(f"   Has 'Actual':   {format_stats['has_actual']}/{total} ({results['has_actual']*100:.1f}%)")
+        print(f"   Has structure:  {format_stats['has_structure']}/{total} ({results['has_structure']*100:.1f}%)")
+        print(f"   Has BBox:       {format_stats['has_bbox']}/{total} ({results['has_bbox']*100:.1f}%)")
+        print(f"\n🎯 Full Format Compliance: {format_stats['format_correct']}/{total} ({results['format_correct']*100:.1f}%)")
+
+        if format_errors:
+            print(f"\n⚠️ Format errors found: {len(format_errors)} cases")
+            print("   (See detailed report in JSON output)")
+
+        return results
+
+    # ============================================================
+    # Comprehensive Evaluation
+    # ============================================================
+
+    def evaluate_all(self) -> Dict:
+        """Run all evaluation tasks"""
+        print("\n" + "="*80)
+        print("COMPREHENSIVE EVALUATION FOR SCAFFOLD MISSING DETECTION")
+        print("="*80)
+        print(f"Dataset: {len(self.matched_pairs)} matched samples")
+
+        results = {}
+
+        # Run all tasks
+        results['task1_binary_classification'] = self.eval_binary_classification()
+        results['task2_component_type'] = self.eval_component_type()
+        results['task3_bbox_grounding'] = self.eval_bbox_grounding()
+        results['task4_counting'] = self.eval_counting()
+        results['task5_spatial_reasoning'] = self.eval_spatial_reasoning()
+        results['task6_template_format'] = self.eval_template_format()
+
+        # Summary
+        self.print_summary(results)
+
+        return results
+
+    def print_summary(self, results: Dict):
+        """Print summary of all metrics"""
+        print("\n" + "="*80)
+        print("SUMMARY METRICS")
+        print("="*80)
+
+        print(f"\n✅ Task 1 - Binary Classification:")
+        print(f"   Accuracy: {results['task1_binary_classification']['accuracy']*100:.2f}%")
+
+        print(f"\n✅ Task 2 - Component Type:")
+        print(f"   Macro F1: {results['task2_component_type']['macro_f1']*100:.2f}%")
+
+        print(f"\n🎯 Task 3 - BBox Grounding:")
+        print(f"   Mean IoU: {results['task3_bbox_grounding']['mean_iou']:.4f}")
+        print(f"   Precision@0.5: {results['task3_bbox_grounding']['precision@0.5']*100:.2f}%")
+
+        print(f"\n✅ Task 4 - Counting:")
+        print(f"   MAE: {results['task4_counting']['mae']:.3f}")
+        print(f"   Exact Match: {results['task4_counting']['exact_match_rate']*100:.2f}%")
+
+        print(f"\n✅ Task 5 - Spatial Reasoning:")
+        print(f"   Overall: {results['task5_spatial_reasoning']['overall_accuracy']*100:.2f}%")
+
+        print(f"\n✅ Task 6 - Template Format:")
+        print(f"   Compliance: {results['task6_template_format']['format_correct']*100:.2f}%")
+
+        print("\n" + "="*80)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Comprehensive Evaluation for Scaffold Missing Detection')
+    parser.add_argument('--gt-file', type=str, required=True,
+                       help='Ground truth JSONL file (gt_missing.jsonl)')
+    parser.add_argument('--pred-file', type=str, required=True,
+                       help='Prediction JSONL file (answers_missing.jsonl)')
+    parser.add_argument('--output-json', type=str, default='eval_results.json',
+                       help='Output JSON file for detailed results')
+    parser.add_argument('--output-report', type=str, default='eval_report.txt',
+                       help='Output text report')
+
+    args = parser.parse_args()
+
+    # Run evaluation
+    evaluator = ComprehensiveMissingEvaluator(args.gt_file, args.pred_file)
+    results = evaluator.evaluate_all()
+
+    # Save results
+    with open(args.output_json, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    print(f"\n💾 Results saved to: {args.output_json}")
+    print(f"✅ Evaluation complete!")
+
+
+if __name__ == '__main__':
+    main()
