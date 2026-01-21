@@ -42,7 +42,8 @@ def load_model(model_path, model_base=None):
         model_name=model_name,
         load_8bit=False,
         load_4bit=False,
-        device_map="auto",
+        device_map=None,  # Single GPU (cuda:0)
+        device="cuda:0",
         torch_dtype=torch.bfloat16  # Match training dtype
     )
 
