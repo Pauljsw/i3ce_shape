@@ -289,40 +289,72 @@ class EnhancedScaffoldGeneratorFinal:
         cumulative_heights: List[float],
         config: Dict
     ) -> Tuple[List[ScaffoldComponent], List[str]]:
-        """Create vertical posts with missing detection capability."""
+        """Create vertical posts with missing detection capability (RANDOMIZED)."""
         components: List[ScaffoldComponent] = []
         violations: List[str] = []
 
         safety_status = config.get('safety_status', 'safe')
         base_missing_rate = {'safe': 0.0, 'minor_defect': 0.1, 'major_defect': 0.2}[safety_status]
-        
+
         diameter = ScaffoldSpecs.PIPE_DIAMETERS['vertical']
         max_height = max(cumulative_heights)
 
+        # Step 1: Create ALL vertical posts as normal (no missing yet)
+        all_verticals = []
         for col in range(num_bays + 1):
             for row in range(2):  # Front and back rows
                 x = col * bay_width
                 y = row * depth
-                
-                # 🆕 Check missing quota before creating missing component
-                should_be_missing = (random.random() < base_missing_rate and 
-                                   self.can_add_missing_component())
-                
-                if should_be_missing:
-                    # Create missing marker at mid-height
+
+                start_pos = np.array([x, y, 0])
+                end_pos = np.array([x, y, max_height])
+                points = self.generate_pipe_points(start_pos, end_pos, diameter)
+
+                if len(points) > 0:
+                    bbox = self.calculate_bbox(points)
+                    comp = ScaffoldComponent(
+                        name=f"vertical_post_{self.instance_counter}",
+                        semantic_id=0,
+                        instance_id=self.instance_counter,
+                        points=points,
+                        bbox=bbox,
+                        metadata={'column': col, 'row': row, 'position': (x, y)}
+                    )
+                    all_verticals.append(comp)
+                    self.instance_counter += 1
+
+        # Step 2: RANDOMLY select some to convert to missing markers
+        if base_missing_rate > 0 and len(all_verticals) > 0:
+            # Calculate how many should be missing
+            num_candidates = int(len(all_verticals) * base_missing_rate)
+            # Limit by quota
+            num_to_remove = min(num_candidates, self.missing_quota - self.current_missing_count)
+
+            if num_to_remove > 0:
+                # RANDOMIZE: shuffle and pick first N
+                random.shuffle(all_verticals)
+
+                for i in range(num_to_remove):
+                    comp = all_verticals[i]
+                    col = comp.metadata['column']
+                    row = comp.metadata['row']
+                    x, y = comp.metadata['position']
+
+                    # Convert to missing marker
                     mid_height = max_height / 2
                     marker_points = []
                     for _ in range(10):
                         noise = np.random.normal(0, 0.05, 3)
                         marker_points.append([x, y, mid_height] + noise)
-                    
+
                     marker_points = np.array(marker_points)
                     bbox = self.calculate_bbox(marker_points)
-                    
-                    comp = ScaffoldComponent(
-                        name=f"missing_vertical_{col}_{row}_{self.instance_counter}",
+
+                    # Replace with missing marker
+                    all_verticals[i] = ScaffoldComponent(
+                        name=f"missing_vertical_{col}_{row}_{comp.instance_id}",
                         semantic_id=10,
-                        instance_id=self.instance_counter,
+                        instance_id=comp.instance_id,
                         points=marker_points,
                         bbox=bbox,
                         metadata={
@@ -332,30 +364,10 @@ class EnhancedScaffoldGeneratorFinal:
                             'floor': 'all'
                         }
                     )
-                    components.append(comp)
-                    self.instance_counter += 1
-                    self.add_missing_component()  # 🆕 Increment quota counter
+                    self.add_missing_component()
                     violations.append(f"Missing vertical post at column {col}, row {row}")
-                    continue
-                
-                # Create normal vertical post
-                start_pos = np.array([x, y, 0])
-                end_pos = np.array([x, y, max_height])
-                points = self.generate_pipe_points(start_pos, end_pos, diameter)
-                
-                if len(points) > 0:
-                    bbox = self.calculate_bbox(points)
-                    comp = ScaffoldComponent(
-                        name=f"vertical_post_{self.instance_counter}",
-                        semantic_id=0,
-                        instance_id=self.instance_counter,
-                        points=points,
-                        bbox=bbox,
-                        metadata={'column': col, 'row': row}
-                    )
-                    components.append(comp)
-                    self.instance_counter += 1
 
+        components.extend(all_verticals)
         return components, violations
 
     def _create_horizontal_beams_with_validation(
@@ -366,14 +378,17 @@ class EnhancedScaffoldGeneratorFinal:
         cumulative_heights: List[float],
         config: Dict
     ) -> Tuple[List[ScaffoldComponent], List[str]]:
-        """Create horizontal beams with missing detection capability."""
+        """Create horizontal beams with missing detection capability (RANDOMIZED)."""
         components: List[ScaffoldComponent] = []
         violations: List[str] = []
 
         safety_status = config.get('safety_status', 'safe')
         base_missing_rate = {'safe': 0.0, 'minor_defect': 0.1, 'major_defect': 0.2}[safety_status]
-        
+
         diameter = ScaffoldSpecs.PIPE_DIAMETERS['horizontal']
+
+        # Step 1: Create ALL horizontal beams as normal (no missing yet)
+        all_horizontals = []
 
         for floor_idx, z in enumerate(cumulative_heights[:-1]):
             # X-direction beams
@@ -381,41 +396,8 @@ class EnhancedScaffoldGeneratorFinal:
                 for side_idx, j in enumerate([0, depth]):
                     start_pos = np.array([bay * bay_width, j, z])
                     end_pos = np.array([(bay + 1) * bay_width, j, z])
-                    
-                    # 🆕 Check missing quota
-                    should_be_missing = (random.random() < base_missing_rate and 
-                                       self.can_add_missing_component())
-                    
-                    if should_be_missing:
-                        mid_pos = (start_pos + end_pos) / 2.0
-                        marker_points = []
-                        for _ in range(10):
-                            noise = np.random.normal(0, 0.05, 3)
-                            marker_points.append(mid_pos + noise)
-                        
-                        marker_points = np.array(marker_points)
-                        bbox = self.calculate_bbox(marker_points)
-                        comp = ScaffoldComponent(
-                            name=f"missing_horizontal_X_{bay}_{side_idx}_{floor_idx}_{self.instance_counter}",
-                            semantic_id=10,
-                            instance_id=self.instance_counter,
-                            points=marker_points,
-                            bbox=bbox,
-                            metadata={
-                                'defect_type': 'missing_horizontal',
-                                'orientation': 'X',
-                                'floor': floor_idx,
-                                'bay': bay,
-                                'side': side_idx,
-                            }
-                        )
-                        components.append(comp)
-                        self.instance_counter += 1
-                        self.add_missing_component()  # 🆕 Increment quota counter
-                        violations.append(f"Missing horizontal beam X at floor {floor_idx}, bay {bay}")
-                        continue
-                    
-                    # Create normal beam
+                    mid_pos = (start_pos + end_pos) / 2.0
+
                     points = self.generate_pipe_points(start_pos, end_pos, diameter)
                     if len(points) > 0:
                         bbox = self.calculate_bbox(points)
@@ -430,50 +412,18 @@ class EnhancedScaffoldGeneratorFinal:
                                 'floor': floor_idx,
                                 'bay': bay,
                                 'side': side_idx,
+                                'mid_pos': mid_pos
                             }
                         )
-                        components.append(comp)
+                        all_horizontals.append(comp)
                         self.instance_counter += 1
 
             # Y-direction beams
             for col in range(num_bays + 1):
                 start_pos = np.array([col * bay_width, 0, z])
                 end_pos = np.array([col * bay_width, depth, z])
-                
-                # 🆕 Check missing quota
-                should_be_missing = (random.random() < base_missing_rate and 
-                                   self.can_add_missing_component())
-                
-                if should_be_missing:
-                    mid_pos = (start_pos + end_pos) / 2.0
-                    marker_points = []
-                    for _ in range(10):
-                        noise = np.random.normal(0, 0.05, 3)
-                        marker_points.append(mid_pos + noise)
-                    
-                    marker_points = np.array(marker_points)
-                    bbox = self.calculate_bbox(marker_points)
-                    comp = ScaffoldComponent(
-                        name=f"missing_horizontal_Y_{col}_{floor_idx}_{self.instance_counter}",
-                        semantic_id=10,
-                        instance_id=self.instance_counter,
-                        points=marker_points,
-                        bbox=bbox,
-                        metadata={
-                            'defect_type': 'missing_horizontal',
-                            'orientation': 'Y',
-                            'floor': floor_idx,
-                            'column': col,
-                            'side': 0,
-                        }
-                    )
-                    components.append(comp)
-                    self.instance_counter += 1
-                    self.add_missing_component()  # 🆕 Increment quota counter
-                    violations.append(f"Missing horizontal beam Y at floor {floor_idx}, column {col}")
-                    continue
-                
-                # Create normal beam
+                mid_pos = (start_pos + end_pos) / 2.0
+
                 points = self.generate_pipe_points(start_pos, end_pos, diameter)
                 if len(points) > 0:
                     bbox = self.calculate_bbox(points)
@@ -488,11 +438,65 @@ class EnhancedScaffoldGeneratorFinal:
                             'floor': floor_idx,
                             'column': col,
                             'side': 0,
+                            'mid_pos': mid_pos
                         }
                     )
-                    components.append(comp)
+                    all_horizontals.append(comp)
                     self.instance_counter += 1
 
+        # Step 2: RANDOMLY select some to convert to missing markers
+        if base_missing_rate > 0 and len(all_horizontals) > 0:
+            num_candidates = int(len(all_horizontals) * base_missing_rate)
+            num_to_remove = min(num_candidates, self.missing_quota - self.current_missing_count)
+
+            if num_to_remove > 0:
+                # RANDOMIZE: shuffle and pick first N
+                random.shuffle(all_horizontals)
+
+                for i in range(num_to_remove):
+                    comp = all_horizontals[i]
+                    floor_idx = comp.metadata['floor']
+                    mid_pos = comp.metadata['mid_pos']
+                    orientation = comp.metadata['orientation']
+
+                    # Convert to missing marker
+                    marker_points = []
+                    for _ in range(10):
+                        noise = np.random.normal(0, 0.05, 3)
+                        marker_points.append(mid_pos + noise)
+
+                    marker_points = np.array(marker_points)
+                    bbox = self.calculate_bbox(marker_points)
+
+                    # Build name based on orientation
+                    if orientation == 'X':
+                        bay = comp.metadata['bay']
+                        side_idx = comp.metadata['side']
+                        name = f"missing_horizontal_X_{bay}_{side_idx}_{floor_idx}_{comp.instance_id}"
+                        violation_msg = f"Missing horizontal beam X at floor {floor_idx}, bay {bay}"
+                    else:  # Y
+                        col = comp.metadata['column']
+                        name = f"missing_horizontal_Y_{col}_{floor_idx}_{comp.instance_id}"
+                        violation_msg = f"Missing horizontal beam Y at floor {floor_idx}, column {col}"
+
+                    # Replace with missing marker
+                    all_horizontals[i] = ScaffoldComponent(
+                        name=name,
+                        semantic_id=10,
+                        instance_id=comp.instance_id,
+                        points=marker_points,
+                        bbox=bbox,
+                        metadata={
+                            'defect_type': 'missing_horizontal',
+                            'orientation': orientation,
+                            'floor': floor_idx,
+                            **{k: v for k, v in comp.metadata.items() if k in ['bay', 'column', 'side']}
+                        }
+                    )
+                    self.add_missing_component()
+                    violations.append(violation_msg)
+
+        components.extend(all_horizontals)
         return components, violations
 
     def _create_platforms_with_validation(
@@ -503,48 +507,18 @@ class EnhancedScaffoldGeneratorFinal:
         cumulative_heights: List[float],
         config: Dict
     ) -> Tuple[List[ScaffoldComponent], List[str]]:
-        """Create platforms with missing detection capability."""
+        """Create platforms with missing detection capability (RANDOMIZED)."""
         components: List[ScaffoldComponent] = []
         violations: List[str] = []
 
         safety_status = config.get('safety_status', 'safe')
         base_missing_rate = {'safe': 0.0, 'minor_defect': 0.1, 'major_defect': 0.2}[safety_status]
 
+        # Step 1: Create ALL platforms as normal (no missing yet)
+        all_platforms = []
+
         for floor_idx, z in enumerate(cumulative_heights[:-1]):
             for bay in range(num_bays):
-                # 🆕 Check missing quota
-                should_be_missing = (random.random() < base_missing_rate and 
-                                   self.can_add_missing_component())
-                
-                if should_be_missing:
-                    # Missing platform marker
-                    center_x = (bay + 0.5) * bay_width
-                    center_y = depth / 2
-                    
-                    marker_points = []
-                    for _ in range(10):
-                        x = center_x + random.uniform(-0.1, 0.1)
-                        y = center_y + random.uniform(-0.1, 0.1)
-                        marker_points.append([x, y, z])
-
-                    marker_points = np.array(marker_points)
-                    bbox = self.calculate_bbox(marker_points)
-
-                    component = ScaffoldComponent(
-                        name=f"missing_platform_{floor_idx}_{bay}_{self.instance_counter}",
-                        semantic_id=10,
-                        instance_id=self.instance_counter,
-                        points=marker_points,
-                        bbox=bbox,
-                        metadata={'defect_type': 'missing_platform', 'floor': floor_idx, 'bay': bay}
-                    )
-                    components.append(component)
-                    self.instance_counter += 1
-                    self.add_missing_component()  # 🆕 Increment quota counter
-                    violations.append(f"Missing platform at floor {floor_idx}, bay {bay}")
-                    continue
-
-                # Normal platform
                 platform_center = np.array([
                     (bay + 0.5) * bay_width,
                     depth / 2,
@@ -567,11 +541,58 @@ class EnhancedScaffoldGeneratorFinal:
                         instance_id=self.instance_counter,
                         points=platform_points,
                         bbox=bbox,
-                        metadata={'width': platform_width, 'floor': floor_idx, 'bay': bay}
+                        metadata={
+                            'width': platform_width,
+                            'floor': floor_idx,
+                            'bay': bay,
+                            'center': platform_center
+                        }
                     )
-                    components.append(component)
+                    all_platforms.append(component)
                     self.instance_counter += 1
 
+        # Step 2: RANDOMLY select some to convert to missing markers
+        if base_missing_rate > 0 and len(all_platforms) > 0:
+            num_candidates = int(len(all_platforms) * base_missing_rate)
+            num_to_remove = min(num_candidates, self.missing_quota - self.current_missing_count)
+
+            if num_to_remove > 0:
+                # RANDOMIZE: shuffle and pick first N
+                random.shuffle(all_platforms)
+
+                for i in range(num_to_remove):
+                    comp = all_platforms[i]
+                    floor_idx = comp.metadata['floor']
+                    bay = comp.metadata['bay']
+                    center = comp.metadata['center']
+
+                    # Convert to missing marker
+                    marker_points = []
+                    for _ in range(10):
+                        x = center[0] + random.uniform(-0.1, 0.1)
+                        y = center[1] + random.uniform(-0.1, 0.1)
+                        marker_points.append([x, y, center[2]])
+
+                    marker_points = np.array(marker_points)
+                    bbox = self.calculate_bbox(marker_points)
+
+                    # Replace with missing marker
+                    all_platforms[i] = ScaffoldComponent(
+                        name=f"missing_platform_{floor_idx}_{bay}_{comp.instance_id}",
+                        semantic_id=10,
+                        instance_id=comp.instance_id,
+                        points=marker_points,
+                        bbox=bbox,
+                        metadata={
+                            'defect_type': 'missing_platform',
+                            'floor': floor_idx,
+                            'bay': bay
+                        }
+                    )
+                    self.add_missing_component()
+                    violations.append(f"Missing platform at floor {floor_idx}, bay {bay}")
+
+        components.extend(all_platforms)
         return components, violations
 
     def _create_vertical_ladders(
