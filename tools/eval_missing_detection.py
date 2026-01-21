@@ -30,7 +30,11 @@ def evaluate_missing_detection(answers_file: str, gt_file: str) -> None:
         for line in f_gt:
             record = json.loads(line)
             qid = record['question_id']
-            label = record['text'].strip().lower()
+            # Use 'label' field if available (Idea 1 format), otherwise fallback to 'text'
+            if 'label' in record:
+                label = record['label'].strip().lower()
+            else:
+                label = record['text'].strip().lower()
             gt_labels[qid] = label
 
     # Evaluate predictions

@@ -293,15 +293,18 @@ def generate_missing_dataset(
                 
             # Extract question text (remove <point> token)
             question_text = convs[0]['value'].replace('<point>\n', '').strip()
+            # Extract full answer text (Template-Guided format with Expected vs Actual)
+            answer_text = convs[1]['value']
+
             eval_questions.append({
                 'question_id': ann['id'],
                 'point': ann['point'],
                 'text': question_text,
                 'category': 'scaffold',
             })
-            
+
             # Determine label and bounding boxes
-            label = 'No'  # Default
+            label = 'No'  # Default (simple Yes/No for backward compatibility)
             bboxes: List[List[List[float]]] = []
             
             # Determine answer based on task type
@@ -445,7 +448,8 @@ def generate_missing_dataset(
             eval_gt.append({
                 'question_id': ann['id'],
                 'point': ann['point'],
-                'text': label,
+                'text': answer_text,  # Full answer with Expected vs Actual (Idea 1)
+                'label': label,  # Simple Yes/No for backward compatibility
                 'bboxes': bboxes,
                 'category': 'scaffold',
             })
