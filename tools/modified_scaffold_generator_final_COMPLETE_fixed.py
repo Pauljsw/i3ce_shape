@@ -775,12 +775,13 @@ class EnhancedScaffoldGeneratorFinal:
         return components, violations
 
     def _format_bbox(self, bbox: Optional[np.ndarray]) -> str:
-        """Format bounding box coordinates for display."""
-        if bbox is None:
+        """Format bounding box coordinates in ShapeLLM standard 8-corner format."""
+        if bbox is None or len(bbox) != 8:
             return "N/A"
-        min_coords = np.min(bbox, axis=0)
-        max_coords = np.max(bbox, axis=0)
-        return f"({min_coords[0]:.3f}, {min_coords[1]:.3f}, {min_coords[2]:.3f}) to ({max_coords[0]:.3f}, {max_coords[1]:.3f}, {max_coords[2]:.3f})"
+        # ShapeLLM standard format: [[x1, y1, z1], [x2, y2, z2], ..., [x8, y8, z8]]
+        corners_list = [[float(f"{corner[0]:.3f}"), float(f"{corner[1]:.3f}"), float(f"{corner[2]:.3f}")]
+                        for corner in bbox]
+        return str(corners_list)
 
     def generate_shapellm_annotations(self, scene_id: str, components: List[ScaffoldComponent], config: Dict) -> List[Dict]:
         """Generate comprehensive missing detection annotations."""
