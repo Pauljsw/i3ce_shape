@@ -1268,8 +1268,8 @@ class EnhancedScaffoldGeneratorFinal:
         scale = float(max_distance + 1e-12)
         coord_scaled = coord_centered / scale
 
-        # Step 3: Random rotation
-        Rz_deg = float(np.random.uniform(-10.0, 10.0))
+        # Step 3: Random rotation (Z-axis, ±45 degrees for better viewpoint diversity)
+        Rz_deg = float(np.random.uniform(-45.0, 45.0))
         theta = np.radians(Rz_deg)
         cos_t, sin_t = np.cos(theta), np.sin(theta)
         R = np.array([[cos_t, -sin_t, 0], [sin_t, cos_t, 0], [0, 0, 1]], dtype=np.float32)
