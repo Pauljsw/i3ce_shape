@@ -787,16 +787,10 @@ class EnhancedScaffoldGeneratorFinal:
         """Generate comprehensive missing detection annotations with Template-Guided Reasoning (Idea 1)."""
         annotations: List[Dict] = []
 
-        # 🆕 Calculate expected structure based on scaffold configuration
+        # Get scaffold configuration for labeling
         num_bays = config.get('num_bays', 3)
         num_floors = config.get('num_floors', 4)
         num_rows = 2  # Always 2 rows (front and back)
-
-        expected_verticals = (num_bays + 1) * num_rows  # columns × rows
-        expected_horizontals_per_floor = num_bays * 2 + (num_bays + 1)  # X-direction + Y-direction
-        expected_horizontals = expected_horizontals_per_floor * (num_floors - 1)  # Exclude ground level
-        expected_platforms = num_bays * (num_floors - 1)  # One per bay per floor
-
         scaffold_spec = f"{num_bays}-bay, {num_rows}-row, {num_floors}-floor scaffold"
 
         # Separate components by type
@@ -809,13 +803,19 @@ class EnhancedScaffoldGeneratorFinal:
         present_horizontals = [c for c in components if c.semantic_id == 1]
         present_platforms = [c for c in components if c.semantic_id == 3]
 
-        # 🆕 Actual counts (present + missing = expected)
+        # ✅ CORRECTED: Expected = Present + Missing (complete structure before missing)
+        # This ensures logical consistency: Expected >= Actual
+        expected_verticals = len(present_verticals) + len(missing_verticals)
+        expected_horizontals = len(present_horizontals) + len(missing_horizontals)
+        expected_platforms = len(present_platforms) + len(missing_platforms)
+
+        # Actual counts (present components only)
         actual_verticals = len(present_verticals)
         actual_horizontals = len(present_horizontals)
         actual_platforms = len(present_platforms)
 
-        # 🆕 Expected vs Actual summary text
-        expected_text = f"Expected structure: {scaffold_spec} requires {expected_verticals} vertical posts ({num_bays + 1} columns × {num_rows} rows), {expected_horizontals} horizontal beams, {expected_platforms} platforms."
+        # Expected vs Actual summary text
+        expected_text = f"Expected structure: {scaffold_spec} has {expected_verticals} vertical posts, {expected_horizontals} horizontal beams, {expected_platforms} platforms."
         actual_text = f"Actual: {actual_verticals} vertical posts, {actual_horizontals} horizontal beams, {actual_platforms} platforms."
 
         # 1. Overall summary question
