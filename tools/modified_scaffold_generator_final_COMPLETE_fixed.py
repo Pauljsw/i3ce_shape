@@ -784,8 +784,20 @@ class EnhancedScaffoldGeneratorFinal:
         return str(corners_list)
 
     def generate_shapellm_annotations(self, scene_id: str, components: List[ScaffoldComponent], config: Dict) -> List[Dict]:
-        """Generate comprehensive missing detection annotations."""
+        """Generate comprehensive missing detection annotations with Template-Guided Reasoning (Idea 1)."""
         annotations: List[Dict] = []
+
+        # 🆕 Calculate expected structure based on scaffold configuration
+        num_bays = config.get('num_bays', 3)
+        num_floors = config.get('num_floors', 4)
+        num_rows = 2  # Always 2 rows (front and back)
+
+        expected_verticals = (num_bays + 1) * num_rows  # columns × rows
+        expected_horizontals_per_floor = num_bays * 2 + (num_bays + 1)  # X-direction + Y-direction
+        expected_horizontals = expected_horizontals_per_floor * (num_floors - 1)  # Exclude ground level
+        expected_platforms = num_bays * (num_floors - 1)  # One per bay per floor
+
+        scaffold_spec = f"{num_bays}-bay, {num_rows}-row, {num_floors}-floor scaffold"
 
         # Separate components by type
         missing_comps = [c for c in components if c.semantic_id == 10]
@@ -796,6 +808,15 @@ class EnhancedScaffoldGeneratorFinal:
         present_verticals = [c for c in components if c.semantic_id == 0]
         present_horizontals = [c for c in components if c.semantic_id == 1]
         present_platforms = [c for c in components if c.semantic_id == 3]
+
+        # 🆕 Actual counts (present + missing = expected)
+        actual_verticals = len(present_verticals)
+        actual_horizontals = len(present_horizontals)
+        actual_platforms = len(present_platforms)
+
+        # 🆕 Expected vs Actual summary text
+        expected_text = f"Expected structure: {scaffold_spec} requires {expected_verticals} vertical posts ({num_bays + 1} columns × {num_rows} rows), {expected_horizontals} horizontal beams, {expected_platforms} platforms."
+        actual_text = f"Actual: {actual_verticals} vertical posts, {actual_horizontals} horizontal beams, {actual_platforms} platforms."
 
         # 1. Overall summary question
         if missing_comps:
@@ -824,11 +845,11 @@ class EnhancedScaffoldGeneratorFinal:
                 'conversations': [
                     {
                         'from': 'human',
-                        'value': '<point>\nAre there any missing components? If so, provide their locations.'
+                        'value': f'<point>\nThis is a {scaffold_spec}. Are there any missing components? If so, provide their locations.'
                     },
                     {
                         'from': 'gpt',
-                        'value': f"Yes, {len(missing_comps)} components are missing:\n" + '\n'.join(missing_info)
+                        'value': f"{expected_text}\n{actual_text}\nMissing: {len(missing_comps)} components are missing:\n" + '\n'.join(missing_info)
                     }
                 ],
                 'task_type': 'missing_detection_summary',
@@ -969,11 +990,11 @@ class EnhancedScaffoldGeneratorFinal:
                 'conversations': [
                     {
                         'from': 'human',
-                        'value': '<point>\nAre there any missing components?'
+                        'value': f'<point>\nThis is a {scaffold_spec}. Are there any missing components?'
                     },
                     {
                         'from': 'gpt',
-                        'value': 'No, all scaffold components are properly installed.'
+                        'value': f'{expected_text}\n{actual_text}\nNo missing components detected. All scaffold components are properly installed.'
                     }
                 ],
                 'task_type': 'missing_detection_none',
@@ -995,11 +1016,11 @@ class EnhancedScaffoldGeneratorFinal:
                 'conversations': [
                     {
                         'from': 'human',
-                        'value': '<point>\nAre there any missing vertical posts?'
+                        'value': f'<point>\nThis {scaffold_spec} should have {expected_verticals} vertical posts. Are there any missing vertical posts?'
                     },
                     {
                         'from': 'gpt',
-                        'value': f"Yes, {len(missing_verticals)} vertical posts are missing:\n" + '\n'.join(vertical_info)
+                        'value': f"Expected: {expected_verticals} vertical posts.\nActual: {actual_verticals} vertical posts.\nMissing: {len(missing_verticals)} vertical posts are missing:\n" + '\n'.join(vertical_info)
                     }
                 ],
                 'task_type': 'missing_detection_vertical_summary',
@@ -1049,11 +1070,11 @@ class EnhancedScaffoldGeneratorFinal:
                 'conversations': [
                     {
                         'from': 'human',
-                        'value': '<point>\nAre there any missing horizontal beams?'
+                        'value': f'<point>\nThis {scaffold_spec} should have {expected_horizontals} horizontal beams. Are there any missing horizontal beams?'
                     },
                     {
                         'from': 'gpt',
-                        'value': f"Yes, {len(missing_horizontals)} horizontal beams are missing:\n" + '\n'.join(horizontal_info)
+                        'value': f"Expected: {expected_horizontals} horizontal beams.\nActual: {actual_horizontals} horizontal beams.\nMissing: {len(missing_horizontals)} horizontal beams are missing:\n" + '\n'.join(horizontal_info)
                     }
                 ],
                 'task_type': 'missing_detection_horizontal_summary',
