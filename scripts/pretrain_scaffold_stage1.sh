@@ -85,7 +85,7 @@ deepspeed llava/train/train_mem.py \
     --prompt_token_num 32 \
     --bf16 True \
     --output_dir $OUTPUT_DIR \
-    --num_train_epochs 15 \
+    --num_train_epochs 5 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 8 \
