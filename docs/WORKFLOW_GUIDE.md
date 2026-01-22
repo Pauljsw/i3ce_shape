@@ -253,6 +253,69 @@ evaluation_results/
 └── visualization_data.json        # 그래프용 데이터
 ```
 
+---
+
+## Phase 5.5: GPT-based Evaluation (Optional but Recommended)
+
+### Purpose
+- GPT-4/3.5를 사용한 의미적 유사도 평가
+- 5가지 카테고리별 점수 (Binary, Component Type, Count, Location, Overall)
+- 논문에서 많이 사용되는 평가 방식
+
+### When to Run
+- After Phase 5 (rule-based evaluation)
+- When you need semantic evaluation for paper
+
+### Command
+```bash
+# Detailed evaluation (5 categories)
+python tools/gpt_evaluate_scaffold.py \
+    --predictions ./outputs/test_answers.jsonl \
+    --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+    --output-dir ./evaluation_results \
+    --openai-key YOUR_OPENAI_API_KEY \
+    --model gpt-4
+
+# Simple scoring (faster, cheaper)
+python tools/gpt_evaluate_scaffold.py \
+    --predictions ./outputs/test_answers.jsonl \
+    --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+    --output-dir ./evaluation_results \
+    --openai-key YOUR_OPENAI_API_KEY \
+    --model gpt-3.5-turbo \
+    --simple
+
+# Test with limited samples first
+python tools/gpt_evaluate_scaffold.py \
+    --predictions ./outputs/test_answers.jsonl \
+    --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+    --output-dir ./evaluation_results \
+    --openai-key YOUR_OPENAI_API_KEY \
+    --max-samples 50
+```
+
+### Output
+```
+evaluation_results/
+├── gpt_eval_results.jsonl         # 개별 샘플 점수
+└── gpt_eval_summary.json          # 카테고리별 평균 점수
+```
+
+### GPT Evaluation Categories
+
+| Category | Description | Scoring |
+|----------|-------------|---------|
+| Binary Detection | Yes/No 정답 여부 | 100=정답, 0=오답 |
+| Component Type | 부재 종류 식별 | 100=완벽, 50=부분, 0=오류 |
+| Count Accuracy | 개수 정확도 | 100=정확, 70=±1, 40=±2 |
+| Location Description | 위치 설명 정확도 | 100=정확, 50=부분 |
+| Overall Quality | 전체 품질 | 종합 평가 |
+
+### Cost Estimation
+- GPT-3.5-turbo: ~$0.001-0.002 per sample
+- GPT-4: ~$0.03-0.05 per sample
+- 1000 samples with GPT-4 ≈ $30-50
+
 ### Metrics Explained
 
 | Category | Metric | Description |
