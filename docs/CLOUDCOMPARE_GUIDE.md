@@ -14,11 +14,22 @@
 
 ## 최종 목표: 이런 CSV 파일 만들기
 
+**권장 형식 (Center/Dimension) - CloudCompare 값 그대로 복사:**
+```csv
+component_id,type,cx,cy,cz,dx,dy,dz
+c1,vertical,-5.937477,5.495575,116.242111,1.31834,0.200557,0.140015
+c2,horizontal,0.5,3.2,112.5,10.5,0.15,0.08
+c3,platform,0.0,2.5,115.0,2.0,1.5,0.05
+```
+
+CloudCompare에서 보이는 값:
+- `cx, cy, cz` ← Global Box Center의 X, Y, Z
+- `dx, dy, dz` ← Box Dimensions의 X, Y, Z
+
+**대안 형식 (Min/Max) - 직접 계산한 경우:**
 ```csv
 component_id,type,x_min,x_max,y_min,y_max,z_min,z_max
-c1,vertical,-5.23,-4.18,0.12,0.98,0.00,24.56
-c2,horizontal,-5.23,5.07,0.50,0.65,12.00,12.50
-c3,platform,-5.20,5.04,0.12,8.95,11.80,12.20
+c1,vertical,-6.60,-5.28,5.40,5.60,116.17,116.31
 ```
 
 ---
@@ -163,52 +174,53 @@ component_id,type,x_min,x_max,y_min,y_max,z_min,z_max
 DB Tree에서 "[원본].part" 클릭하여 선택
 ```
 
-### 6.2 Properties 패널 확인
+### 6.2 Properties 패널에서 값 확인
 
-**방법 A: Properties 패널 (기본)**
-```
-1. 왼쪽 하단 "Properties" 패널 확인
-2. 스크롤하여 "Bounding Box" 섹션 찾기
-3. 다음 값들 확인:
+Properties 패널 (왼쪽 하단)에서 다음 값들을 찾습니다:
 
-   Box dimensions:
-   - X: [min_x ; max_x]
-   - Y: [min_y ; max_y]
-   - Z: [min_z ; max_z]
 ```
+Box dimensions:        ← dx, dy, dz 값
+  X: 1.31834
+  Y: 0.200557
+  Z: 0.140015
 
-**방법 B: Console 출력**
-```
-1. 메뉴: Edit → Compute → Bounding Box
-2. 또는: 선택 후 우클릭 → Compute → Bounding Box
-3. Console 패널(하단)에 좌표 출력됨
+Global box center:     ← cx, cy, cz 값
+  X: -5.937477
+  Y: 5.495575
+  Z: 116.242111
 ```
 
-**방법 C: 직접 확인**
-```
-1. DB Tree에서 부재 점군 우클릭
-2. "Properties" 선택
-3. 팝업 창에서 "Box dimensions" 확인
+### 6.3 CSV에 바로 기록 (권장 방식)
+
+위 값을 그대로 복사해서 CSV에 기록:
+
+```csv
+component_id,type,cx,cy,cz,dx,dy,dz
+c1,vertical,-5.937477,5.495575,116.242111,1.31834,0.200557,0.140015
 ```
 
-### 6.3 좌표 읽기 예시
+**각 값의 의미:**
+| CloudCompare 항목 | CSV 컬럼 | 설명 |
+|------------------|----------|------|
+| Global box center X | cx | 중심 X 좌표 |
+| Global box center Y | cy | 중심 Y 좌표 |
+| Global box center Z | cz | 중심 Z 좌표 |
+| Box dimensions X | dx | X 방향 크기 (폭) |
+| Box dimensions Y | dy | Y 방향 크기 (깊이) |
+| Box dimensions Z | dz | Z 방향 크기 (높이) |
 
-CloudCompare에서 이렇게 보임:
+### 6.4 (대안) Min/Max 형식으로 기록
+
+직접 계산하고 싶다면:
 ```
-Bounding Box:
-  X: [-5.234 ; -4.178]
-  Y: [0.123 ; 0.987]
-  Z: [0.000 ; 24.567]
+x_min = cx - dx/2 = -5.937477 - 1.31834/2 = -6.596647
+x_max = cx + dx/2 = -5.937477 + 1.31834/2 = -5.278307
+... (y, z도 동일)
 ```
 
-이것을 CSV에 이렇게 기록:
-```
-x_min = -5.234
-x_max = -4.178
-y_min = 0.123
-y_max = 0.987
-z_min = 0.000
-z_max = 24.567
+```csv
+component_id,type,x_min,x_max,y_min,y_max,z_min,z_max
+c1,vertical,-6.596647,-5.278307,5.395297,5.595854,116.172104,116.312119
 ```
 
 ---
@@ -217,10 +229,12 @@ z_max = 24.567
 
 ### 7.1 부재 정보 기록
 
-Excel 또는 메모장에 한 줄 추가:
+Excel 또는 메모장에 한 줄 추가 (Center/Dimension 형식):
 ```
-c1,vertical,-5.234,-4.178,0.123,0.987,0.000,24.567
+c1,vertical,-5.937477,5.495575,116.242111,1.31834,0.200557,0.140015
 ```
+
+순서: `component_id, type, cx, cy, cz, dx, dy, dz`
 
 ### 7.2 부재 유형 판단
 
@@ -284,16 +298,16 @@ Step 4-7 반복
 
 ## Step 9: 모든 부재 완료 후 CSV 저장
 
-### 9.1 최종 CSV 내용 예시
+### 9.1 최종 CSV 내용 예시 (Center/Dimension 형식)
 ```csv
-component_id,type,x_min,x_max,y_min,y_max,z_min,z_max
-c1,vertical,-5.234,-4.178,0.123,0.987,0.000,24.567
-c2,vertical,4.112,5.068,0.145,1.009,0.000,24.567
-c3,vertical,-5.230,-4.174,8.123,8.987,0.000,24.567
-c4,horizontal,-5.234,5.068,0.500,0.560,12.000,12.060
-c5,horizontal,-5.234,5.068,0.500,0.560,18.000,18.060
-c6,platform,-5.200,5.034,0.123,8.950,11.980,12.020
-c7,platform,-5.200,5.034,0.123,8.950,17.980,18.020
+component_id,type,cx,cy,cz,dx,dy,dz
+c1,vertical,-5.937477,5.495575,116.242111,1.31834,0.200557,0.140015
+c2,vertical,4.590,5.577,116.242,1.312,0.201,0.140
+c3,vertical,-5.702,8.555,116.242,1.312,0.201,0.140
+c4,horizontal,0.500,3.200,112.500,10.500,0.150,0.080
+c5,horizontal,0.500,3.200,118.500,10.500,0.150,0.080
+c6,platform,0.000,2.500,115.000,2.000,1.500,0.050
+c7,platform,0.000,2.500,121.000,2.000,1.500,0.050
 ```
 
 ### 9.2 파일 저장
@@ -376,13 +390,14 @@ Display → Save viewport as object
 작업 전:
 - [ ] CloudCompare 설치됨
 - [ ] 점군 파일 준비됨
-- [ ] CSV 파일 헤더 작성됨
+- [ ] CSV 파일 헤더 작성됨: `component_id,type,cx,cy,cz,dx,dy,dz`
 
 각 부재마다:
 - [ ] Segment Tool로 부재 선택
 - [ ] Segment In → Confirm
-- [ ] Properties에서 Bounding Box 확인
-- [ ] x_min, x_max, y_min, y_max, z_min, z_max 기록
+- [ ] Properties에서 확인:
+  - [ ] Global box center: X, Y, Z → cx, cy, cz
+  - [ ] Box dimensions: X, Y, Z → dx, dy, dz
 - [ ] type (vertical/horizontal/platform) 판단
 - [ ] CSV에 한 줄 추가
 - [ ] 원본 복구 후 다음 부재로

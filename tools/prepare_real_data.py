@@ -21,20 +21,27 @@ Real Scaffold Point Cloud Preprocessing for Validation
    - 형식: CSV (콤마 구분)
    - 내용: 각 부재의 bounding box 좌표
 
-   CSV 형식 예시:
+   ★ 형식 A: Center/Dimension (CloudCompare에서 바로 복사 - 권장!)
    ┌─────────────────────────────────────────────────────────────────────┐
-   │ component_id,type,x_min,x_max,y_min,y_max,z_min,z_max              │
-   │ c1,vertical,-0.52,-0.42,0.01,0.10,0.00,2.45                        │
-   │ c2,horizontal,-0.52,0.51,0.05,0.07,1.20,1.25                       │
-   │ c3,platform,-0.52,0.50,0.01,0.90,2.38,2.42                         │
+   │ component_id,type,cx,cy,cz,dx,dy,dz                                │
+   │ c1,vertical,-5.937477,5.495575,116.242111,1.31834,0.200557,0.14    │
+   │ c2,horizontal,0.5,3.2,112.5,10.5,0.15,0.08                         │
+   │ c3,platform,0.0,2.5,115.0,2.0,1.5,0.05                             │
    └─────────────────────────────────────────────────────────────────────┘
 
-   각 컬럼 설명:
+   CloudCompare에서 복사할 값:
+   - cx, cy, cz: Global Box Center의 X, Y, Z
+   - dx, dy, dz: Box Dimensions의 X, Y, Z
+
+   형식 B: Min/Max (직접 계산한 경우)
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ component_id,type,x_min,x_max,y_min,y_max,z_min,z_max              │
+   │ c1,vertical,-6.60,-5.28,5.40,5.60,116.17,116.31                    │
+   └─────────────────────────────────────────────────────────────────────┘
+
+   공통:
    - component_id: 부재 고유 이름 (자유롭게, 예: c1, v1, part_a)
    - type: 부재 종류 (vertical, horizontal, platform 중 하나)
-   - x_min, x_max: X축 범위 (CloudCompare Bounding Box의 Min/Max X)
-   - y_min, y_max: Y축 범위 (CloudCompare Bounding Box의 Min/Max Y)
-   - z_min, z_max: Z축 범위 (CloudCompare Bounding Box의 Min/Max Z)
 
 ============================================================================
 사용법
@@ -226,7 +233,18 @@ def load_components_csv(csv_path: str) -> List[Component]:
     """
     부재 좌표 CSV 파일 로드
 
-    필수 컬럼: component_id, type, x_min, x_max, y_min, y_max, z_min, z_max
+    지원 형식 2가지:
+
+    형식 A (Min/Max):
+        component_id,type,x_min,x_max,y_min,y_max,z_min,z_max
+        c1,vertical,-6.59,-5.28,5.39,5.60,116.17,116.31
+
+    형식 B (Center/Dimension) - CloudCompare에서 바로 복사:
+        component_id,type,cx,cy,cz,dx,dy,dz
+        c1,vertical,-5.937477,5.495575,116.242111,1.31834,0.200557,0.140015
+
+        cx,cy,cz = Global Box Center (X,Y,Z)
+        dx,dy,dz = Box Dimensions (X,Y,Z)
     """
     components = []
 
@@ -234,23 +252,64 @@ def load_components_csv(csv_path: str) -> List[Component]:
 
     with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
 
-        # Validate columns
-        required = ['component_id', 'type', 'x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max']
-        if not all(col in reader.fieldnames for col in required):
-            missing = [col for col in required if col not in reader.fieldnames]
-            raise ValueError(f"CSV missing required columns: {missing}")
+        # Detect format
+        minmax_cols = ['x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max']
+        center_cols = ['cx', 'cy', 'cz', 'dx', 'dy', 'dz']
+
+        use_center_format = all(col in fieldnames for col in center_cols)
+        use_minmax_format = all(col in fieldnames for col in minmax_cols)
+
+        if use_center_format:
+            print("  Detected format: Center/Dimension (cx,cy,cz,dx,dy,dz)")
+        elif use_minmax_format:
+            print("  Detected format: Min/Max (x_min,x_max,...)")
+        else:
+            raise ValueError(
+                f"CSV must have either:\n"
+                f"  - Min/Max columns: {minmax_cols}\n"
+                f"  - Center/Dimension columns: {center_cols}\n"
+                f"  Found columns: {fieldnames}"
+            )
 
         for row in reader:
+            component_id = row['component_id'].strip()
+            comp_type = row['type'].strip().lower()
+
+            if use_center_format:
+                # Center/Dimension format: calculate min/max
+                cx = float(row['cx'])
+                cy = float(row['cy'])
+                cz = float(row['cz'])
+                dx = float(row['dx'])
+                dy = float(row['dy'])
+                dz = float(row['dz'])
+
+                x_min = cx - dx / 2
+                x_max = cx + dx / 2
+                y_min = cy - dy / 2
+                y_max = cy + dy / 2
+                z_min = cz - dz / 2
+                z_max = cz + dz / 2
+            else:
+                # Min/Max format: use directly
+                x_min = float(row['x_min'])
+                x_max = float(row['x_max'])
+                y_min = float(row['y_min'])
+                y_max = float(row['y_max'])
+                z_min = float(row['z_min'])
+                z_max = float(row['z_max'])
+
             comp = Component(
-                component_id=row['component_id'].strip(),
-                type=row['type'].strip().lower(),
-                x_min=float(row['x_min']),
-                x_max=float(row['x_max']),
-                y_min=float(row['y_min']),
-                y_max=float(row['y_max']),
-                z_min=float(row['z_min']),
-                z_max=float(row['z_max']),
+                component_id=component_id,
+                type=comp_type,
+                x_min=x_min,
+                x_max=x_max,
+                y_min=y_min,
+                y_max=y_max,
+                z_min=z_min,
+                z_max=z_max,
             )
 
             # Validate type
