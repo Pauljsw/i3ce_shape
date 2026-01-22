@@ -99,6 +99,7 @@ deepspeed llava/train/train_mem.py \
     --vision_tower_path ./checkpoints/recon/large.pth \
     --pretrain_mm_mlp_adapter $MM_PROJECTOR_PATH \
     --mm_projector_type mlp2x_gelu \
+    --tune_mm_mlp_adapter True \
     --mm_vision_select_layer -2 \
     --mm_use_pt_start_end False \
     --mm_use_pt_patch_token False \
