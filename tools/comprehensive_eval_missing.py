@@ -7,6 +7,7 @@ Evaluates tasks with proper question-type filtering based on actual data generat
 import os
 import re
 import json
+import ast
 import argparse
 import numpy as np
 from collections import defaultdict
@@ -173,6 +174,18 @@ class ComprehensiveMissingEvaluator:
 
         return types
 
+    def infer_type_from_qid(self, qid: str) -> List[str]:
+        """Infer component types from question_id pattern"""
+        qid_lower = qid.lower()
+        types = []
+        if "_vertical_" in qid_lower:
+            types.append("vertical")
+        if "_horizontal_" in qid_lower:
+            types.append("horizontal")
+        if "_platform_" in qid_lower:
+            types.append("platform")
+        return types
+
     def eval_component_type(self) -> Dict:
         """Evaluate component type classification for questions with MISSING components (exclude positive)"""
         print("\n" + "="*60)
@@ -204,6 +217,10 @@ class ComprehensiveMissingEvaluator:
             # Extract GT types from text
             gt_text = gt.get('text', '')
             gt_types = set(self.extract_component_types(gt_text))
+
+            # ✅ qid 기반 보강 (text에서 못 뽑으면 qid에서라도 확보)
+            if not gt_types:
+                gt_types = set(self.infer_type_from_qid(qid))
 
             # Extract predicted types
             pred_text = pred.get('text', '')
@@ -276,7 +293,7 @@ class ComprehensiveMissingEvaluator:
         bboxes = []
         for match in matches:
             try:
-                bbox = eval(match)  # Parse as Python list
+                bbox = ast.literal_eval(match)  # Safe parse
                 if isinstance(bbox, list) and len(bbox) == 8:
                     # Validate it's 8 corners with 3D coordinates
                     if all(isinstance(corner, list) and len(corner) == 3 for corner in bbox):
@@ -328,7 +345,7 @@ class ComprehensiveMissingEvaluator:
         total_gt_bboxes = 0
 
         iou_thresholds = [0.25, 0.5, 0.75]
-        precision_at_iou = {th: 0 for th in iou_thresholds}
+        success_at_iou = {th: 0 for th in iou_thresholds}
 
         used = 0
         skipped = 0
@@ -370,10 +387,10 @@ class ComprehensiveMissingEvaluator:
 
                 all_ious.append(best_iou)
 
-                # Count for precision@IoU
+                # Count for success rate@IoU
                 for th in iou_thresholds:
                     if best_iou >= th:
-                        precision_at_iou[th] += 1
+                        success_at_iou[th] += 1
 
         # Calculate metrics
         mean_iou = np.mean(all_ious) if all_ious else 0.0
@@ -392,8 +409,8 @@ class ComprehensiveMissingEvaluator:
         }
 
         for th in iou_thresholds:
-            prec = precision_at_iou[th] / total_gt_bboxes if total_gt_bboxes > 0 else 0.0
-            results[f'precision@{th}'] = float(prec)
+            rate = success_at_iou[th] / total_gt_bboxes if total_gt_bboxes > 0 else 0.0
+            results[f'success_rate@{th}'] = float(rate)
 
         # Print results
         print(f"\n🧾 Filter rule:")
@@ -406,10 +423,10 @@ class ComprehensiveMissingEvaluator:
         print(f"\n📏 IoU Statistics:")
         print(f"   Mean IoU:   {mean_iou:.4f}")
         print(f"   Median IoU: {median_iou:.4f}")
-        print(f"\n🎯 Precision @ IoU Threshold:")
+        print(f"\n🎯 Success Rate @ IoU Threshold (GT-based):")
         for th in iou_thresholds:
-            prec = results[f'precision@{th}']
-            print(f"   IoU ≥ {th}: {prec*100:.2f}%")
+            rate = results[f'success_rate@{th}']
+            print(f"   IoU ≥ {th}: {rate*100:.2f}%")
 
         return results
 
@@ -576,15 +593,28 @@ class ComprehensiveMissingEvaluator:
 
             used += 1
 
-            # Simple correctness check: does prediction mention the target?
-            gt_label = gt.get('label', '').lower()
             pred_text = pred.get('text', '').lower()
 
-            # Check if answer is correct based on GT label
-            if gt_label == 'yes':
-                correct = 'yes' in pred_text or 'missing' in pred_text
+            # ✅ GT truth: bboxes 기반 (label 사용 금지)
+            gt_has_missing = len(gt.get('bboxes', [])) > 0
+
+            # ✅ Pred judgement
+            pred_says_no_missing = ('no missing' in pred_text) or ('not missing' in pred_text) or ('none' in pred_text)
+            pred_says_missing = ('missing' in pred_text) and (not pred_says_no_missing)
+
+            # ✅ 해당 floor/bay 언급 여부로 "공간"성 강화
+            mentions_target = True
+            if target is not None:
+                if qtype == 'floor':
+                    mentions_target = ('floor' in pred_text) and (str(target) in pred_text)
+                elif qtype == 'bay':
+                    mentions_target = ('bay' in pred_text) and (str(target) in pred_text)
+
+            # ✅ Correctness
+            if gt_has_missing:
+                correct = pred_says_missing and mentions_target
             else:
-                correct = 'no' in pred_text or 'not' in pred_text or 'no missing' in pred_text
+                correct = pred_says_no_missing and mentions_target
 
             if qtype == 'floor':
                 floor_metrics[target]['correct'] += int(correct)
@@ -694,9 +724,12 @@ class ComprehensiveMissingEvaluator:
                     format_stats[key] += 1
 
             if not validation['format_correct']:
+                # Only check required fields for missing
+                required = ['has_expected', 'has_actual']
+                missing = [k for k in required if not validation[k]]
                 format_errors.append({
                     'question_id': pred['question_id'],
-                    'missing': [k for k, v in validation.items() if not v]
+                    'missing': missing
                 })
 
         total = used
