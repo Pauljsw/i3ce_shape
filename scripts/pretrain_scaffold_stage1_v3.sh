@@ -19,7 +19,8 @@ LLM_VERSION="qizekun/ShapeLLM_7B_gapartnet_v1.0"
 OUTPUT_NAME="scaffold-stage1-v3"
 
 # V3 Data paths (generated via scaffold_data_pipeline)
-DATA_PATH="./playground/data/shapellm/scaffold_v3/stage2_sft_train.json"
+# Stage 1 uses CAPTION data for feature alignment (NOT QA data)
+DATA_PATH="./playground/data/shapellm/scaffold_v3/stage1_caption_train.json"
 PCS_PATH="./playground/data/shapellm/scaffold_v3/pcs"
 
 # To generate V3 data:
@@ -52,10 +53,11 @@ echo "=============================================================="
 
 # Check if data exists
 if [ ! -f "$DATA_PATH" ]; then
-    echo "ERROR: Training data not found at ${DATA_PATH}"
+    echo "ERROR: Stage 1 caption data not found at ${DATA_PATH}"
     echo "Please generate V3 data first:"
-    echo "  cd /home/user/i3ce_shape"
-    echo "  python tools/generate_scaffold_data_v3.py --num_scenes 2000 --output_dir ./playground/data/shapellm/scaffold_v3"
+    echo "  python -m tools.scaffold_data_pipeline.main \\"
+    echo "      --num-scenes 2000 \\"
+    echo "      --output-dir ./playground/data/shapellm/scaffold_v3"
     exit 1
 fi
 
