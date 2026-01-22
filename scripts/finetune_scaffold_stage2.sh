@@ -26,7 +26,7 @@ set -e
 
 # Configuration
 LLM_VERSION="qizekun/ShapeLLM_7B_gapartnet_v1.0"
-OUTPUT_NAME="scaffold-stage2-instruction-tuning"
+OUTPUT_NAME="scaffold-stage2-instruction-tuning_mmproj_tune"
 
 # Stage 1 checkpoint (mm_projector)
 STAGE1_CHECKPOINT="./checkpoints/scaffold-stage1-feature-alignment"
@@ -100,6 +100,7 @@ deepspeed llava/train/train_mem.py \
     --pretrain_mm_mlp_adapter $MM_PROJECTOR_PATH \
     --mm_projector_type mlp2x_gelu \
     --tune_mm_mlp_adapter True \
+    --freeze_mm_mlp_adapter False \
     --mm_vision_select_layer -2 \
     --mm_use_pt_start_end False \
     --mm_use_pt_patch_token False \
@@ -111,7 +112,7 @@ deepspeed llava/train/train_mem.py \
     --prompt_token_num 32 \
     --bf16 True \
     --output_dir $OUTPUT_DIR \
-    --num_train_epochs 3 \
+    --num_train_epochs 1 \
     --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 4 \
