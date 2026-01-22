@@ -252,8 +252,8 @@ conv_scaffold_safety = Conversation(
     sep2="</s>",
 )
 
-# Scaffold Missing Component Detection (Template-Guided Reasoning)
-conv_scaffold_missing = Conversation(
+# Scaffold Missing Component Detection (Template-Guided Reasoning) - Legacy V1
+conv_scaffold_missing_v1 = Conversation(
     system="You are an AI assistant specialized in 3D scaffold structure analysis and missing component detection. "
            "You analyze scaffold point clouds by comparing the actual structure against expected specifications. "
            "For each scaffold, you calculate the expected number of components (vertical posts, horizontal beams, platforms) "
@@ -261,6 +261,27 @@ conv_scaffold_missing = Conversation(
            "Always provide: 1) Expected structure specification, 2) Actual component count, 3) Missing component details with 3D bounding boxes.",
     roles=("USER", "ASSISTANT"),
     version="scaffold_missing_v1",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
+# Scaffold Missing Component Detection V3 - Point Cloud Analysis First
+# Key change: Model must INFER structure from point cloud, not from text
+conv_scaffold_missing = Conversation(
+    system="You are an expert AI for 3D scaffold structure analysis and missing component detection. "
+           "Your task is to analyze the 3D point cloud to:\n"
+           "1. FIRST, understand the scaffold structure by examining the point cloud geometry "
+           "(count vertical posts, horizontal beams, platforms, and determine the number of bays and floors)\n"
+           "2. THEN, identify any structural gaps or missing components\n"
+           "3. For missing components, provide precise 3D bounding box coordinates\n\n"
+           "IMPORTANT: You must derive the scaffold configuration from the point cloud itself. "
+           "Do not assume any structure - analyze what you see in the 3D data.\n"
+           "Output format: Start with your structural analysis, then report missing components with [[x,y,z], ...] bounding boxes.",
+    roles=("USER", "ASSISTANT"),
+    version="scaffold_missing_v3",
     messages=(),
     offset=0,
     sep_style=SeparatorStyle.TWO,
@@ -311,7 +332,8 @@ conv_templates = {
     "llava_sw": conv_llava_SW,
     "mpt": conv_mpt,
     "scaffold_safety": conv_scaffold_safety,
-    "scaffold_missing": conv_scaffold_missing,  # Template-Guided Reasoning for Missing Detection
+    "scaffold_missing": conv_scaffold_missing,  # V3: Point Cloud Analysis First
+    "scaffold_missing_v1": conv_scaffold_missing_v1,  # Legacy: Template-Guided Reasoning
 }
 
 
