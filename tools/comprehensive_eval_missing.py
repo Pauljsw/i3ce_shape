@@ -405,7 +405,7 @@ class ComprehensiveMissingEvaluator:
             'detected_samples': detected_count,
             'used_samples': used,
             'skipped_samples': skipped,
-            'filter_rule': "Exclude: *_missing_none only"
+            'filter_rule': "Use samples with gt_bboxes only (skips *_missing_none and any gt_bboxes=[])"
         }
 
         for th in iou_thresholds:
@@ -414,7 +414,7 @@ class ComprehensiveMissingEvaluator:
 
         # Print results
         print(f"\n🧾 Filter rule:")
-        print(f"   Exclude: *_missing_none only (all questions with bboxes)")
+        print(f"   Use only samples with GT bboxes (skip *_missing_none and any empty-bbox samples)")
         print(f"✅ Evaluated samples: {used}")
         print(f"⏭️  Skipped samples:   {skipped}")
 
@@ -602,13 +602,14 @@ class ComprehensiveMissingEvaluator:
             pred_says_no_missing = ('no missing' in pred_text) or ('not missing' in pred_text) or ('none' in pred_text)
             pred_says_missing = ('missing' in pred_text) and (not pred_says_no_missing)
 
-            # ✅ 해당 floor/bay 언급 여부로 "공간"성 강화
+            # ✅ 해당 floor/bay 언급 여부로 "공간"성 강화 (유연한 표현 허용)
             mentions_target = True
             if target is not None:
                 if qtype == 'floor':
-                    mentions_target = ('floor' in pred_text) and (str(target) in pred_text)
+                    # Allow 'floor' or 'level' keywords
+                    mentions_target = (str(target) in pred_text) and any(k in pred_text for k in ['floor', 'level'])
                 elif qtype == 'bay':
-                    mentions_target = ('bay' in pred_text) and (str(target) in pred_text)
+                    mentions_target = (str(target) in pred_text) and ('bay' in pred_text)
 
             # ✅ Correctness
             if gt_has_missing:
