@@ -4,3 +4,4 @@ import datasets.ModelNetDatasetFewShot
 import datasets.ScanObjectNNDataset
 import datasets.HybridDataset
 import datasets.OpenShape
+import datasets.ScaffoldDataset
