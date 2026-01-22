@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive Evaluation for Scaffold Missing Detection
-Evaluates all 6 tasks with detailed metrics
+Evaluates tasks with proper question-type filtering: WHERE/WHAT/HOW_MANY/WHICH_TYPE
 """
 
 import os
@@ -52,26 +52,38 @@ class ComprehensiveMissingEvaluator:
         return matched
 
     # ============================================================
-    # Task 1: Binary Classification
+    # Task 1: Binary Classification (결손 유무)
     # ============================================================
 
     def eval_binary_classification(self) -> Dict:
-        """Evaluate binary classification (missing yes/no)"""
+        """Evaluate binary classification (missing yes/no) ONLY for *_missing_summary and *_missing_none"""
         print("\n" + "="*60)
-        print("TASK 1: BINARY CLASSIFICATION (Missing Yes/No)")
+        print("TASK 1: BINARY CLASSIFICATION (결손 유무)")
+        print("Only for *_missing_summary and *_missing_none")
         print("="*60)
 
         y_true = []
         y_pred = []
 
+        used = 0
+        skipped = 0
+
         for gt, pred in self.matched_pairs:
+            qid = gt.get("question_id", "")
+
+            # ✅ Only evaluate summary / none questions
+            if not (qid.endswith("_missing_summary") or qid.endswith("_missing_none")):
+                skipped += 1
+                continue
+
+            used += 1
+
             # GT label
             gt_label = gt.get('label', gt.get('text', '')).strip().lower()
             gt_binary = 1 if gt_label in ['yes', 'y', 'true'] else 0
 
             # Predicted label
             pred_text = pred.get('text', '').strip().lower()
-            # Simple heuristic: if mentions "missing" and not "no missing"
             if 'no missing' in pred_text or 'not missing' in pred_text:
                 pred_binary = 0
             elif 'missing' in pred_text:
@@ -82,12 +94,24 @@ class ComprehensiveMissingEvaluator:
             y_true.append(gt_binary)
             y_pred.append(pred_binary)
 
-        # Calculate metrics
+        # Edge case: no samples
+        if used == 0:
+            print("⚠️ No *_missing_summary or *_missing_none samples found.")
+            return {
+                'accuracy': 0.0,
+                'precision_no': 0.0, 'recall_no': 0.0, 'f1_no': 0.0, 'support_no': 0,
+                'precision_yes': 0.0, 'recall_yes': 0.0, 'f1_yes': 0.0, 'support_yes': 0,
+                'confusion_matrix': [[0, 0], [0, 0]],
+                'used_samples': used,
+                'skipped_samples': skipped,
+                'filter_rule': "qid.endswith('_missing_summary') or qid.endswith('_missing_none')"
+            }
+
+        # Metrics
         accuracy = accuracy_score(y_true, y_pred)
         precision, recall, f1, support = precision_recall_fscore_support(
-            y_true, y_pred, average=None, labels=[0, 1]
+            y_true, y_pred, average=None, labels=[0, 1], zero_division=0
         )
-
         cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
 
         results = {
@@ -100,10 +124,19 @@ class ComprehensiveMissingEvaluator:
             'recall_yes': float(recall[1]),
             'f1_yes': float(f1[1]),
             'support_yes': int(support[1]),
-            'confusion_matrix': cm.tolist()
+            'confusion_matrix': cm.tolist(),
+            # Debug info
+            'used_samples': used,
+            'skipped_samples': skipped,
+            'filter_rule': "qid.endswith('_missing_summary') or qid.endswith('_missing_none')"
         }
 
-        # Print results
+        # Print
+        print(f"\n🧾 Filter rule:")
+        print(f"   *_missing_summary, *_missing_none only")
+        print(f"✅ Evaluated samples: {used}")
+        print(f"⏭️  Skipped samples:   {skipped}")
+
         print(f"\n📊 Overall Accuracy: {accuracy*100:.2f}%")
         print(f"\n🔴 Class 'No Missing':")
         print(f"   Precision: {precision[0]*100:.2f}%")
@@ -124,7 +157,7 @@ class ComprehensiveMissingEvaluator:
         return results
 
     # ============================================================
-    # Task 2: Component Type Classification
+    # Task 2: Component Type Classification (어떤 타입?)
     # ============================================================
 
     def extract_component_types(self, text: str) -> List[str]:
@@ -142,22 +175,28 @@ class ComprehensiveMissingEvaluator:
         return types
 
     def eval_component_type(self) -> Dict:
-        """Evaluate component type classification"""
+        """Evaluate component type classification ONLY for *_missing_detail"""
         print("\n" + "="*60)
-        print("TASK 2: COMPONENT TYPE CLASSIFICATION")
+        print("TASK 2: COMPONENT TYPE CLASSIFICATION (어떤 타입?)")
+        print("Only for *_missing_detail")
         print("="*60)
 
         type_metrics = defaultdict(lambda: {'tp': 0, 'fp': 0, 'fn': 0})
 
-        for gt, pred in self.matched_pairs:
-            # Extract GT types from missing components
-            gt_types = set()
-            for bbox_data in gt.get('bboxes', []):
-                # If bboxes is list of bboxes, need to check metadata
-                # For now, extract from GT text
-                pass
+        used = 0
+        skipped = 0
 
-            # Simpler: extract from GT text
+        for gt, pred in self.matched_pairs:
+            qid = gt.get("question_id", "")
+
+            # ✅ Only evaluate detail questions
+            if not qid.endswith("_missing_detail"):
+                skipped += 1
+                continue
+
+            used += 1
+
+            # Extract GT types from text
             gt_text = gt.get('text', '')
             gt_types = set(self.extract_component_types(gt_text))
 
@@ -177,6 +216,11 @@ class ComprehensiveMissingEvaluator:
         # Calculate metrics
         results = {}
         f1_scores = []
+
+        print(f"\n🧾 Filter rule:")
+        print(f"   *_missing_detail only")
+        print(f"✅ Evaluated samples: {used}")
+        print(f"⏭️  Skipped samples:   {skipped}")
 
         print()
         for ctype in ['vertical', 'horizontal', 'platform']:
@@ -203,20 +247,23 @@ class ComprehensiveMissingEvaluator:
             print(f"   F1-Score:  {f1*100:.2f}%")
             print(f"   (TP={tp}, FP={fp}, FN={fn})")
 
-        macro_f1 = np.mean(f1_scores)
+        macro_f1 = np.mean(f1_scores) if f1_scores else 0.0
         results['macro_f1'] = float(macro_f1)
+        results['used_samples'] = used
+        results['skipped_samples'] = skipped
+        results['filter_rule'] = "qid.endswith('_missing_detail')"
+
         print(f"\n🎯 Macro-averaged F1: {macro_f1*100:.2f}%")
 
         return results
 
     # ============================================================
-    # Task 3: BBox Grounding (Most Important!)
+    # Task 3: BBox Grounding (어디서? - 3D 좌표)
     # ============================================================
 
     def extract_bboxes_from_text(self, text: str) -> List[List[List[float]]]:
         """Extract 8-corner bboxes from text using regex"""
         # Pattern: [[x,y,z], [x,y,z], ...]
-        # Look for nested lists
         pattern = r'\[\s*\[\s*[-\d.]+\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\](?:\s*,\s*\[\s*[-\d.]+\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\])*\s*\]'
 
         matches = re.findall(pattern, text)
@@ -265,9 +312,10 @@ class ComprehensiveMissingEvaluator:
             return 0.0
 
     def eval_bbox_grounding(self) -> Dict:
-        """Evaluate 3D bounding box grounding"""
+        """Evaluate 3D bounding box grounding ONLY for *_missing_detail"""
         print("\n" + "="*60)
-        print("TASK 3: 3D BOUNDING BOX GROUNDING")
+        print("TASK 3: 3D BOUNDING BOX GROUNDING (어디서? - 3D 좌표)")
+        print("Only for *_missing_detail")
         print("="*60)
 
         all_ious = []
@@ -277,7 +325,19 @@ class ComprehensiveMissingEvaluator:
         iou_thresholds = [0.25, 0.5, 0.75]
         precision_at_iou = {th: 0 for th in iou_thresholds}
 
+        used = 0
+        skipped = 0
+
         for gt, pred in self.matched_pairs:
+            qid = gt.get("question_id", "")
+
+            # ✅ Only evaluate detail questions
+            if not qid.endswith("_missing_detail"):
+                skipped += 1
+                continue
+
+            used += 1
+
             gt_bboxes = gt.get('bboxes', [])
             if not gt_bboxes:
                 continue
@@ -313,14 +373,17 @@ class ComprehensiveMissingEvaluator:
         # Calculate metrics
         mean_iou = np.mean(all_ious) if all_ious else 0.0
         median_iou = np.median(all_ious) if all_ious else 0.0
-        detection_rate = detected_count / len(self.matched_pairs) if self.matched_pairs else 0.0
+        detection_rate = detected_count / used if used > 0 else 0.0
 
         results = {
             'mean_iou': float(mean_iou),
             'median_iou': float(median_iou),
             'detection_rate': float(detection_rate),
             'total_gt_bboxes': total_gt_bboxes,
-            'detected_samples': detected_count
+            'detected_samples': detected_count,
+            'used_samples': used,
+            'skipped_samples': skipped,
+            'filter_rule': "qid.endswith('_missing_detail')"
         }
 
         for th in iou_thresholds:
@@ -328,8 +391,13 @@ class ComprehensiveMissingEvaluator:
             results[f'precision@{th}'] = float(prec)
 
         # Print results
+        print(f"\n🧾 Filter rule:")
+        print(f"   *_missing_detail only")
+        print(f"✅ Evaluated samples: {used}")
+        print(f"⏭️  Skipped samples:   {skipped}")
+
         print(f"\n📊 BBox Detection Rate: {detection_rate*100:.2f}%")
-        print(f"   ({detected_count}/{len(self.matched_pairs)} samples had predicted bboxes)")
+        print(f"   ({detected_count}/{used} samples had predicted bboxes)")
         print(f"\n📏 IoU Statistics:")
         print(f"   Mean IoU:   {mean_iou:.4f}")
         print(f"   Median IoU: {median_iou:.4f}")
@@ -341,7 +409,7 @@ class ComprehensiveMissingEvaluator:
         return results
 
     # ============================================================
-    # Task 4: Counting Accuracy
+    # Task 4: Counting Accuracy (몇 개?)
     # ============================================================
 
     def extract_count(self, text: str) -> int:
@@ -367,16 +435,29 @@ class ComprehensiveMissingEvaluator:
         return 0
 
     def eval_counting(self) -> Dict:
-        """Evaluate counting accuracy"""
+        """Evaluate counting accuracy ONLY for *_missing_count"""
         print("\n" + "="*60)
-        print("TASK 4: COUNTING ACCURACY")
+        print("TASK 4: COUNTING ACCURACY (몇 개?)")
+        print("Only for *_missing_count")
         print("="*60)
 
         errors = []
         exact_matches = 0
         within_1 = 0
 
+        used = 0
+        skipped = 0
+
         for gt, pred in self.matched_pairs:
+            qid = gt.get("question_id", "")
+
+            # ✅ Only evaluate count questions
+            if not qid.endswith("_missing_count"):
+                skipped += 1
+                continue
+
+            used += 1
+
             # GT count from bboxes
             gt_count = len(gt.get('bboxes', []))
 
@@ -391,6 +472,18 @@ class ComprehensiveMissingEvaluator:
                 exact_matches += 1
             if error <= 1:
                 within_1 += 1
+
+        if used == 0:
+            print("⚠️ No *_missing_count samples found.")
+            return {
+                'mae': 0.0,
+                'exact_match_rate': 0.0,
+                'within_1_rate': 0.0,
+                'error_distribution': {},
+                'used_samples': 0,
+                'skipped_samples': skipped,
+                'filter_rule': "qid.endswith('_missing_count')"
+            }
 
         mae = np.mean(errors) if errors else 0.0
         exact_match_rate = exact_matches / len(errors) if errors else 0.0
@@ -408,8 +501,16 @@ class ComprehensiveMissingEvaluator:
             'mae': float(mae),
             'exact_match_rate': float(exact_match_rate),
             'within_1_rate': float(within_1_rate),
-            'error_distribution': dict(error_dist)
+            'error_distribution': dict(error_dist),
+            'used_samples': used,
+            'skipped_samples': skipped,
+            'filter_rule': "qid.endswith('_missing_count')"
         }
+
+        print(f"\n🧾 Filter rule:")
+        print(f"   *_missing_count only")
+        print(f"✅ Evaluated samples: {used}")
+        print(f"⏭️  Skipped samples:   {skipped}")
 
         print(f"\n📊 Mean Absolute Error (MAE): {mae:.3f}")
         print(f"📊 Exact Match Rate: {exact_match_rate*100:.2f}%")
@@ -426,7 +527,7 @@ class ComprehensiveMissingEvaluator:
         return results
 
     # ============================================================
-    # Task 5: Spatial Reasoning
+    # Task 5: Spatial Reasoning (어디서? - 층/열)
     # ============================================================
 
     def extract_question_type(self, question_id: str) -> Tuple[str, Optional[int]]:
@@ -444,20 +545,33 @@ class ComprehensiveMissingEvaluator:
             return ('general', None)
 
     def eval_spatial_reasoning(self) -> Dict:
-        """Evaluate spatial reasoning (floor/bay specific questions)"""
+        """Evaluate spatial reasoning ONLY for *_missing_location (floor/bay specific questions)"""
         print("\n" + "="*60)
-        print("TASK 5: SPATIAL REASONING")
+        print("TASK 5: SPATIAL REASONING (어디서? - 층/열)")
+        print("Only for *_missing_location")
         print("="*60)
 
         floor_metrics = defaultdict(lambda: {'correct': 0, 'total': 0})
         bay_metrics = defaultdict(lambda: {'correct': 0, 'total': 0})
 
+        used = 0
+        skipped = 0
+
         for gt, pred in self.matched_pairs:
             qid = gt['question_id']
+
+            # ✅ Only evaluate location questions
+            if not qid.endswith("_missing_location"):
+                skipped += 1
+                continue
+
             qtype, target = self.extract_question_type(qid)
 
             if qtype not in ['floor', 'bay']:
+                skipped += 1
                 continue
+
+            used += 1
 
             # Simple correctness check: does prediction mention the target?
             gt_label = gt.get('label', '').lower()
@@ -477,6 +591,11 @@ class ComprehensiveMissingEvaluator:
                 bay_metrics[target]['total'] += 1
 
         results = {'floor': {}, 'bay': {}}
+
+        print(f"\n🧾 Filter rule:")
+        print(f"   *_missing_location only")
+        print(f"✅ Evaluated samples: {used}")
+        print(f"⏭️  Skipped samples:   {skipped}")
 
         print("\n📊 Floor-specific Questions:")
         for floor in sorted(floor_metrics.keys()):
@@ -500,6 +619,10 @@ class ComprehensiveMissingEvaluator:
 
         overall_acc = total_correct / total_count if total_count > 0 else 0.0
         results['overall_accuracy'] = float(overall_acc)
+        results['used_samples'] = used
+        results['skipped_samples'] = skipped
+        results['filter_rule'] = "qid.endswith('_missing_location')"
+
         print(f"\n🎯 Overall Spatial Accuracy: {overall_acc*100:.2f}%")
 
         return results
@@ -528,9 +651,10 @@ class ComprehensiveMissingEvaluator:
         }
 
     def eval_template_format(self) -> Dict:
-        """Evaluate template-guided format compliance"""
+        """Evaluate template-guided format compliance for *_missing_detail"""
         print("\n" + "="*60)
         print("TASK 6: TEMPLATE-GUIDED FORMAT VALIDATION")
+        print("Only for *_missing_detail (Expected/Actual format)")
         print("="*60)
 
         format_stats = {
@@ -543,7 +667,19 @@ class ComprehensiveMissingEvaluator:
 
         format_errors = []
 
+        used = 0
+        skipped = 0
+
         for gt, pred in self.matched_pairs:
+            qid = gt.get("question_id", "")
+
+            # ✅ Only evaluate detail questions (they should have template format)
+            if not qid.endswith("_missing_detail"):
+                skipped += 1
+                continue
+
+            used += 1
+
             pred_text = pred.get('text', '')
             validation = self.validate_template_format(pred_text)
 
@@ -557,10 +693,18 @@ class ComprehensiveMissingEvaluator:
                     'missing': [k for k, v in validation.items() if not v]
                 })
 
-        total = len(self.matched_pairs)
-        results = {k: v/total for k, v in format_stats.items()}
+        total = used
+        results = {k: v/total if total > 0 else 0.0 for k, v in format_stats.items()}
         results['total_samples'] = total
         results['error_count'] = len(format_errors)
+        results['used_samples'] = used
+        results['skipped_samples'] = skipped
+        results['filter_rule'] = "qid.endswith('_missing_detail')"
+
+        print(f"\n🧾 Filter rule:")
+        print(f"   *_missing_detail only (Expected/Actual template)")
+        print(f"✅ Evaluated samples: {used}")
+        print(f"⏭️  Skipped samples:   {skipped}")
 
         print(f"\n📊 Format Compliance:")
         print(f"   Has 'Expected': {format_stats['has_expected']}/{total} ({results['has_expected']*100:.1f}%)")
@@ -583,6 +727,7 @@ class ComprehensiveMissingEvaluator:
         """Run all evaluation tasks"""
         print("\n" + "="*80)
         print("COMPREHENSIVE EVALUATION FOR SCAFFOLD MISSING DETECTION")
+        print("Question-type filtered: WHERE/WHAT/HOW_MANY/WHICH_TYPE")
         print("="*80)
         print(f"Dataset: {len(self.matched_pairs)} matched samples")
 
@@ -607,25 +752,31 @@ class ComprehensiveMissingEvaluator:
         print("SUMMARY METRICS")
         print("="*80)
 
-        print(f"\n✅ Task 1 - Binary Classification:")
+        print(f"\n✅ Task 1 - Binary Classification (결손 유무):")
         print(f"   Accuracy: {results['task1_binary_classification']['accuracy']*100:.2f}%")
+        print(f"   Samples:  {results['task1_binary_classification']['used_samples']}")
 
-        print(f"\n✅ Task 2 - Component Type:")
+        print(f"\n✅ Task 2 - Component Type (어떤 타입?):")
         print(f"   Macro F1: {results['task2_component_type']['macro_f1']*100:.2f}%")
+        print(f"   Samples:  {results['task2_component_type']['used_samples']}")
 
-        print(f"\n🎯 Task 3 - BBox Grounding:")
-        print(f"   Mean IoU: {results['task3_bbox_grounding']['mean_iou']:.4f}")
+        print(f"\n🎯 Task 3 - BBox Grounding (어디서? - 3D 좌표):")
+        print(f"   Mean IoU:      {results['task3_bbox_grounding']['mean_iou']:.4f}")
         print(f"   Precision@0.5: {results['task3_bbox_grounding']['precision@0.5']*100:.2f}%")
+        print(f"   Samples:       {results['task3_bbox_grounding']['used_samples']}")
 
-        print(f"\n✅ Task 4 - Counting:")
-        print(f"   MAE: {results['task4_counting']['mae']:.3f}")
-        print(f"   Exact Match: {results['task4_counting']['exact_match_rate']*100:.2f}%")
+        print(f"\n✅ Task 4 - Counting (몇 개?):")
+        print(f"   MAE:          {results['task4_counting']['mae']:.3f}")
+        print(f"   Exact Match:  {results['task4_counting']['exact_match_rate']*100:.2f}%")
+        print(f"   Samples:      {results['task4_counting']['used_samples']}")
 
-        print(f"\n✅ Task 5 - Spatial Reasoning:")
+        print(f"\n✅ Task 5 - Spatial Reasoning (어디서? - 층/열):")
         print(f"   Overall: {results['task5_spatial_reasoning']['overall_accuracy']*100:.2f}%")
+        print(f"   Samples: {results['task5_spatial_reasoning']['used_samples']}")
 
         print(f"\n✅ Task 6 - Template Format:")
         print(f"   Compliance: {results['task6_template_format']['format_correct']*100:.2f}%")
+        print(f"   Samples:    {results['task6_template_format']['used_samples']}")
 
         print("\n" + "="*80)
 
