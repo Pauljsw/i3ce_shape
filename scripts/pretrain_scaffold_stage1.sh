@@ -19,8 +19,8 @@
 #   - Simple captions describing scaffold structures
 #   - Format: <point> -> "A 3-bay, 2-floor scaffold with 8 vertical posts..."
 #
-# Expected time: ~7 hours on 8x A100
-# Output: mm_projector.bin weights for Stage 2
+# Environment: 4x RTX 3090 (24GB each)
+# Effective batch size: 2 * 8 * 4 = 64
 #
 # ==============================================================================
 
@@ -38,21 +38,22 @@ PCS_PATH="./playground/data/shapellm/scaffold_v2/pcs"
 OUTPUT_DIR="./checkpoints/${OUTPUT_NAME}"
 
 echo "=============================================================="
-echo "Stage 1: Feature Alignment Training"
+echo "Stage 1: Feature Alignment Training (3090 x 4)"
 echo "=============================================================="
 echo "Data: ${DATA_PATH}"
 echo "Output: ${OUTPUT_DIR}"
+echo "Batch: 2 x 8 x 4GPU = 64 effective"
 echo "=============================================================="
 
 # Check if data exists
 if [ ! -f "$DATA_PATH" ]; then
     echo "ERROR: Training data not found at ${DATA_PATH}"
     echo "Please run the data generation pipeline first:"
-    echo "  python -m tools.scaffold_data_pipeline.main --num-scenes 3000"
+    echo "  python -m tools.scaffold_data_pipeline.main --num-scenes 1000"
     exit 1
 fi
 
-# Run training
+# Run training (optimized for 3090 x 4)
 deepspeed llava/train/train_mem.py \
     --deepspeed ./scripts/zero2.json \
     --model_name_or_path $LLM_VERSION \
@@ -63,7 +64,6 @@ deepspeed llava/train/train_mem.py \
     --vision_tower_path ./checkpoints/recon/large.pth \
     --mm_projector_type mlp2x_gelu \
     --tune_mm_mlp_adapter True \
-    --freeze_backbone True \
     --mm_vision_select_layer -2 \
     --mm_use_pt_start_end False \
     --mm_use_pt_patch_token False \
@@ -76,12 +76,12 @@ deepspeed llava/train/train_mem.py \
     --bf16 True \
     --output_dir $OUTPUT_DIR \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 16 \
-    --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
+    --gradient_accumulation_steps 8 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 500 \
+    --save_steps 200 \
     --save_total_limit 3 \
     --learning_rate 1e-3 \
     --weight_decay 0. \
@@ -91,9 +91,9 @@ deepspeed llava/train/train_mem.py \
     --tf32 True \
     --model_max_length 512 \
     --gradient_checkpointing True \
-    --dataloader_num_workers 4 \
+    --dataloader_num_workers 2 \
     --lazy_preprocess True \
-    --report_to tensorboard
+    --report_to none
 
 echo "=============================================================="
 echo "Stage 1 Training Complete!"
