@@ -66,41 +66,131 @@ class QuestionConfig:
 
     # IMPORTANT: All questions use UNIFORM format to prevent data leakage
     # The model should NOT be able to guess Yes/No from question text alone
+    #
+    # V3 UPDATE: Removed {scaffold_spec} from questions!
+    # Model must analyze point cloud to understand structure.
 
-    # Summary question template (SAME for both Yes and No cases)
+    # V3 mode - removes scaffold_spec from questions
+    v3_no_text_shortcuts: bool = True
+
+    # Summary question templates (V3: NO scaffold_spec, diverse templates)
+    summary_question_templates: List[str] = field(default_factory=lambda: [
+        "Analyze this scaffold structure. Are there any missing components? "
+        "If so, provide their types and 3D locations.",
+
+        "Inspect this scaffold for completeness. Report any missing parts "
+        "with their positions and bounding boxes.",
+
+        "Check this structure for gaps or missing elements. "
+        "List all deficiencies found with their 3D locations.",
+
+        "Examine the scaffold and identify any components that should be "
+        "present but are missing. Provide 3D bounding boxes.",
+
+        "Scan this scaffold structure and report any structural incompleteness "
+        "with detailed location information."
+    ])
+
+    # Legacy template (for backward compatibility, not used in V3)
     summary_question_template: str = (
         "This is a {scaffold_spec}. "
         "Analyze the scaffold structure and determine if there are any missing components. "
         "If any components are missing, provide their types and 3D locations."
     )
 
-    # Floor-specific question template
+    # Floor-specific question templates (V3: diverse)
+    floor_question_templates: List[str] = field(default_factory=lambda: [
+        "Check floor {floor_num} for any missing components. "
+        "If found, provide their 3D bounding boxes.",
+
+        "Inspect level {floor_num} of this scaffold. Are there any gaps? "
+        "Report with 3D locations.",
+
+        "Analyze floor {floor_num}. Report any missing parts with bounding boxes.",
+
+        "Examine the {floor_num}th level. What components are absent? "
+        "Provide 3D locations."
+    ])
+
     floor_question_template: str = (
         "Examine floor {floor_num} of this scaffold. "
         "Are there any missing components on this floor? "
         "If so, identify them with their 3D bounding boxes."
     )
 
-    # Bay-specific question template
+    # Bay-specific question templates (V3: diverse)
+    bay_question_templates: List[str] = field(default_factory=lambda: [
+        "Check bay {bay_num} for any missing components. "
+        "If found, provide their 3D bounding boxes.",
+
+        "Inspect bay section {bay_num}. Are there any gaps? "
+        "Report with 3D locations.",
+
+        "Analyze bay {bay_num}. Report any missing parts with bounding boxes.",
+
+        "Examine bay number {bay_num}. What is missing? "
+        "Provide 3D locations."
+    ])
+
     bay_question_template: str = (
         "Inspect bay {bay_num} of this scaffold. "
         "Are there any missing components in this bay? "
         "If so, identify them with their 3D bounding boxes."
     )
 
-    # Specific component question template
+    # Specific component question templates (V3: diverse)
+    specific_question_templates: List[str] = field(default_factory=lambda: [
+        "Is there a {component_type} at {location}? "
+        "Provide the 3D bounding box if present.",
+
+        "Check position {location}. Is the {component_type} present? "
+        "Report with 3D location.",
+
+        "Verify: Does a {component_type} exist at {location}? "
+        "Provide bounding box.",
+
+        "Inspect location {location} for {component_type} presence. "
+        "Report with 3D coordinates."
+    ])
+
     specific_question_template: str = (
         "Check if there is a {component_type} at {location}. "
         "Provide your answer with the component's 3D bounding box if present, "
         "or indicate if it is missing."
     )
 
-    # Component type templates
+    # Component type templates (V3: diverse)
+    vertical_question_templates: List[str] = field(default_factory=lambda: [
+        "Are all vertical posts present in this scaffold? "
+        "Report any missing with 3D locations.",
+
+        "Check for missing vertical supports. "
+        "Provide bounding boxes for any gaps.",
+
+        "Inspect the vertical structural elements. Any missing? "
+        "List with 3D coordinates.",
+
+        "Analyze vertical posts. Report any gaps with locations."
+    ])
+
     vertical_question_template: str = (
         "Analyze the vertical posts of this scaffold. "
         "Are there any missing vertical posts? "
         "If so, provide their locations with 3D bounding boxes."
     )
+
+    horizontal_question_templates: List[str] = field(default_factory=lambda: [
+        "Are all horizontal beams present in this scaffold? "
+        "Report any missing with 3D locations.",
+
+        "Check for missing horizontal members. "
+        "Provide bounding boxes for any gaps.",
+
+        "Inspect the horizontal structural elements. Any missing? "
+        "List with 3D coordinates.",
+
+        "Analyze horizontal beams. Report any gaps with locations."
+    ])
 
     horizontal_question_template: str = (
         "Analyze the horizontal beams of this scaffold. "
@@ -170,8 +260,8 @@ class DatasetConfig:
     val_ratio: float = 0.15
     test_ratio: float = 0.15
 
-    # Output paths
-    output_dir: str = "./playground/data/shapellm/scaffold_v2"
+    # Output paths (V3: default to scaffold_v3)
+    output_dir: str = "./playground/data/shapellm/scaffold_v3"
 
     # File names
     stage1_train_file: str = "stage1_caption_train.json"

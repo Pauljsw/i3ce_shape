@@ -106,6 +106,14 @@ class QuestionGenerator:
         """Generate human-readable scaffold specification."""
         return f"{config['num_bays']}-bay, {config['num_floors']}-floor scaffold"
 
+    def _select_template(self, templates: List[str], **kwargs) -> str:
+        """Select a random template and format it with kwargs (V3 feature)."""
+        template = random.choice(templates)
+        try:
+            return template.format(**kwargs)
+        except KeyError:
+            return template
+
     def _generate_missing_details(
         self,
         missing_components: List[ScaffoldComponent]
@@ -158,13 +166,18 @@ class QuestionGenerator:
         Generate summary question-answer pair.
 
         CRITICAL: Uses SAME question template for both Yes and No cases.
+        V3: No scaffold_spec in questions - model must analyze point cloud.
         """
         scaffold_spec = self._get_scaffold_spec(config)
 
-        # UNIFORM question template - same for Yes and No
-        question = self.q_config.summary_question_template.format(
-            scaffold_spec=scaffold_spec
-        )
+        # V3: Use diverse templates WITHOUT scaffold_spec in question
+        if getattr(self.q_config, 'v3_no_text_shortcuts', False):
+            question = self._select_template(self.q_config.summary_question_templates)
+        else:
+            # Legacy mode
+            question = self.q_config.summary_question_template.format(
+                scaffold_spec=scaffold_spec
+            )
 
         # Get missing components
         missing_comps = [c for c in components if c.semantic_id == 10]
@@ -222,10 +235,16 @@ class QuestionGenerator:
     ) -> QAPair:
         """Generate floor-specific question-answer pair."""
 
-        # UNIFORM question template
-        question = self.q_config.floor_question_template.format(
-            floor_num=target_floor
-        )
+        # V3: Use diverse templates
+        if getattr(self.q_config, 'v3_no_text_shortcuts', False):
+            question = self._select_template(
+                self.q_config.floor_question_templates,
+                floor_num=target_floor
+            )
+        else:
+            question = self.q_config.floor_question_template.format(
+                floor_num=target_floor
+            )
 
         # Find missing on this floor
         missing_on_floor = [
@@ -289,10 +308,16 @@ class QuestionGenerator:
     ) -> QAPair:
         """Generate bay-specific question-answer pair."""
 
-        # UNIFORM question template
-        question = self.q_config.bay_question_template.format(
-            bay_num=target_bay
-        )
+        # V3: Use diverse templates
+        if getattr(self.q_config, 'v3_no_text_shortcuts', False):
+            question = self._select_template(
+                self.q_config.bay_question_templates,
+                bay_num=target_bay
+            )
+        else:
+            question = self.q_config.bay_question_template.format(
+                bay_num=target_bay
+            )
 
         # Find missing in this bay
         missing_in_bay = [
@@ -406,11 +431,18 @@ class QuestionGenerator:
         else:
             return None
 
-        # UNIFORM question template
-        question = self.q_config.specific_question_template.format(
-            component_type=comp_type,
-            location=location
-        )
+        # V3: Use diverse templates
+        if getattr(self.q_config, 'v3_no_text_shortcuts', False):
+            question = self._select_template(
+                self.q_config.specific_question_templates,
+                component_type=comp_type,
+                location=location
+            )
+        else:
+            question = self.q_config.specific_question_template.format(
+                component_type=comp_type,
+                location=location
+            )
 
         if is_missing:
             answer = (
@@ -446,8 +478,11 @@ class QuestionGenerator:
     ) -> Optional[QAPair]:
         """Generate vertical posts summary question-answer pair."""
 
-        # UNIFORM question template
-        question = self.q_config.vertical_question_template
+        # V3: Use diverse templates
+        if getattr(self.q_config, 'v3_no_text_shortcuts', False):
+            question = self._select_template(self.q_config.vertical_question_templates)
+        else:
+            question = self.q_config.vertical_question_template
 
         # Find missing verticals
         missing_verticals = [
@@ -507,8 +542,11 @@ class QuestionGenerator:
     ) -> Optional[QAPair]:
         """Generate horizontal beams summary question-answer pair."""
 
-        # UNIFORM question template
-        question = self.q_config.horizontal_question_template
+        # V3: Use diverse templates
+        if getattr(self.q_config, 'v3_no_text_shortcuts', False):
+            question = self._select_template(self.q_config.horizontal_question_templates)
+        else:
+            question = self.q_config.horizontal_question_template
 
         # Find missing horizontals
         missing_horizontals = [

@@ -30,41 +30,20 @@ echo "Data Dir: ${DATA_DIR}"
 echo "ReCon++ Fine-tune: ${RECON_FINETUNE}"
 echo "=============================================================="
 
-# Step 1: Generate V3 Data
+# Step 1: Generate V3 Data (using scaffold_data_pipeline with V3 templates)
 echo ""
 echo "📊 Step 1: Generating V3 Data..."
 echo "=============================================================="
 
 if [ ! -f "${DATA_DIR}/stage2_sft_train.json" ]; then
     cd /home/user/i3ce_shape
-    python tools/generate_scaffold_data_v3.py \
-        --num_scenes ${NUM_SCENES} \
-        --output_dir ${DATA_DIR} \
-        --train_ratio 0.8 \
-        --val_ratio 0.1
 
-    # Create test questions file for evaluation
-    python -c "
-import json
-with open('${DATA_DIR}/test_gt.jsonl', 'r') as f:
-    lines = f.readlines()
+    # Use the scaffold_data_pipeline (V3 no-text-shortcuts enabled by default in config.py)
+    python -m tools.scaffold_data_pipeline.main \
+        --num-scenes ${NUM_SCENES} \
+        --output-dir ${DATA_DIR} \
+        --with-ablation
 
-questions = []
-for line in lines:
-    data = json.loads(line)
-    questions.append({
-        'question_id': data['question_id'],
-        'point': data['point'],
-        'text': data.get('answer', '').split('\n')[0] if 'answer' in data else '',
-        'task_type': data.get('task_type', '')
-    })
-
-with open('${DATA_DIR}/test_questions.jsonl', 'w') as f:
-    for q in questions:
-        f.write(json.dumps(q) + '\n')
-
-print(f'Created {len(questions)} test questions')
-"
     echo "✅ V3 Data generated successfully!"
 else
     echo "⏭️ V3 Data already exists, skipping..."

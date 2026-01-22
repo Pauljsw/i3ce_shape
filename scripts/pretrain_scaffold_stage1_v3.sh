@@ -18,9 +18,14 @@ set -e
 LLM_VERSION="qizekun/ShapeLLM_7B_gapartnet_v1.0"
 OUTPUT_NAME="scaffold-stage1-v3"
 
-# V3 Data paths
+# V3 Data paths (generated via scaffold_data_pipeline)
 DATA_PATH="./playground/data/shapellm/scaffold_v3/stage2_sft_train.json"
 PCS_PATH="./playground/data/shapellm/scaffold_v3/pcs"
+
+# To generate V3 data:
+# python -m tools.scaffold_data_pipeline.main \
+#     --num-scenes 2000 \
+#     --output-dir ./playground/data/shapellm/scaffold_v3
 
 # ReCon++ encoder options:
 # Option 1: Original pretrained (default)
