@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """
-Rigorous Academic Evaluation for Scaffold Missing Detection
+Rigorous Academic Evaluation for Scaffold Missing Detection - FIXED VERSION
 
-This script provides comprehensive evaluation with:
-1. Ablation Studies - Verify no data leakage
-2. Multi-level Metrics - Binary, Component Type, Count, BBox
-3. Statistical Significance - Multiple runs with confidence intervals
-4. GPT-based Evaluation (optional) - Semantic similarity scoring
+Properly aligned with data generation code structure.
+
+Data Structure (from question_generator.py):
+- test_questions.jsonl: {question_id, point, text: <question>, category}
+- test_gt.jsonl: {question_id, point, text: <answer>, label, bboxes, task_type}
+- predictions: {question_id, text: <model_output>}
 
 Usage:
-    # Full evaluation with ablation
     python tools/evaluate_scaffold_rigorous.py \
         --predictions ./outputs/test_answers.jsonl \
         --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
-        --ablation-dir ./playground/data/shapellm/scaffold_v2 \
         --output-dir ./evaluation_results
-
-    # Quick evaluation (no ablation)
-    python tools/evaluate_scaffold_rigorous.py \
-        --predictions ./outputs/test_answers.jsonl \
-        --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
-        --quick
 """
 
 import os
@@ -31,16 +24,8 @@ from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 from datetime import datetime
-import warnings
 
 import numpy as np
-
-# Optional imports
-try:
-    import openai
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
 
 
 # ============================================================================
@@ -53,26 +38,25 @@ class BBox3D:
     corners: np.ndarray
 
     @classmethod
-    def from_list(cls, corners_list: List[List[float]]) -> 'BBox3D':
-        return cls(corners=np.array(corners_list))
+    def from_list(cls, corners_list: List[List[float]]) -> Optional['BBox3D']:
+        try:
+            arr = np.array(corners_list)
+            if arr.shape == (8, 3):
+                return cls(corners=arr)
+        except:
+            pass
+        return None
 
     def get_axis_aligned_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
         return self.corners.min(axis=0), self.corners.max(axis=0)
 
     def volume(self) -> float:
         min_b, max_b = self.get_axis_aligned_bounds()
-        return float(np.prod(max_b - min_b))
+        dims = max_b - min_b
+        return float(np.prod(np.maximum(dims, 0)))
 
     def center(self) -> np.ndarray:
         return self.corners.mean(axis=0)
-
-
-@dataclass
-class ComponentInfo:
-    """Parsed component information from text."""
-    component_type: str  # 'vertical', 'horizontal', 'platform', 'unknown'
-    count: int
-    bboxes: List[List[List[float]]]
 
 
 @dataclass
@@ -90,31 +74,31 @@ class DetailedMetrics:
     false_positive: int = 0
     false_negative: int = 0
 
-    # Component Type Accuracy
-    vertical_accuracy: float = 0.0
-    horizontal_accuracy: float = 0.0
-    platform_accuracy: float = 0.0
-    component_type_avg_accuracy: float = 0.0
+    # Component Type Detection (from answer text)
+    component_detection_accuracy: float = 0.0
+    vertical_detection_rate: float = 0.0
+    horizontal_detection_rate: float = 0.0
+    platform_detection_rate: float = 0.0
 
     # Count Accuracy
-    count_exact_accuracy: float = 0.0  # Exact match
-    count_tolerance1_accuracy: float = 0.0  # ±1 tolerance
-    count_mae: float = 0.0  # Mean Absolute Error
+    count_exact_accuracy: float = 0.0
+    count_tolerance1_accuracy: float = 0.0
+    count_mae: float = 0.0
 
     # BBox Grounding
     bbox_iou_mean: float = 0.0
     bbox_iou_at_50: float = 0.0
     bbox_iou_at_25: float = 0.0
-    bbox_detection_rate: float = 0.0  # % of GT boxes detected
-    bbox_precision: float = 0.0  # % of pred boxes that match GT
+    bbox_detection_rate: float = 0.0
+    bbox_false_positive_rate: float = 0.0
 
     # Per-Task Accuracy
     per_task_accuracy: Dict[str, float] = field(default_factory=dict)
 
     # Sample counts
     num_samples: int = 0
-    num_yes_samples: int = 0
-    num_no_samples: int = 0
+    num_yes_gt: int = 0
+    num_no_gt: int = 0
     num_pred_boxes: int = 0
     num_gt_boxes: int = 0
 
@@ -136,103 +120,156 @@ class EvaluationReport:
     main_metrics: DetailedMetrics
     ablation_results: List[AblationResult]
     data_leakage_detected: bool
-    gpt_scores: Optional[Dict[str, float]] = None
     warnings: List[str] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
 
 
 # ============================================================================
-# Parsing Functions
+# Parsing Functions - Aligned with question_generator.py output
 # ============================================================================
 
-def parse_yes_no_label(text: str) -> str:
-    """Extract Yes/No label from text."""
-    text_lower = text.lower().strip()
+def parse_binary_from_prediction(pred_text: str, task_type: str) -> str:
+    """
+    Parse Yes/No from model prediction text.
 
-    # Explicit patterns
+    The question types and their Yes/No meanings:
+    - missing_detection_summary: Yes = missing exists, No = no missing
+    - missing_detection_floor: Yes = missing on floor, No = no missing
+    - missing_detection_bay: Yes = missing in bay, No = no missing
+    - missing_detection_specific: Yes = component present, No = component missing
+    - missing_detection_vertical_summary: Yes = vertical missing, No = no vertical missing
+    - missing_detection_horizontal_summary: Yes = horizontal missing, No = no horizontal missing
+    """
+    text_lower = pred_text.lower().strip()
+
+    # For specific component questions, the meaning is reversed
+    # "Is there a component at X?" -> Yes = present, No = missing
+    if task_type == 'missing_detection_specific':
+        # Check if model says component exists
+        if text_lower.startswith('yes'):
+            return 'Yes'  # Component is present
+        elif text_lower.startswith('no'):
+            return 'No'   # Component is missing
+        # Inference
+        if 'missing' in text_lower or 'absent' in text_lower:
+            return 'No'
+        if 'present' in text_lower or 'exists' in text_lower or 'there is' in text_lower:
+            return 'Yes'
+        return 'No'  # Default: component not found
+
+    # For all other question types: Yes = missing detected, No = no missing
+    # Explicit start patterns
     if text_lower.startswith('yes'):
-        if 'no missing' in text_lower or 'no defect' in text_lower:
+        # Double check for negation
+        if 'no missing' in text_lower[:50] or 'no defect' in text_lower[:50]:
             return 'No'
         return 'Yes'
     elif text_lower.startswith('no'):
-        if 'no,' in text_lower[:10]:  # "No, the component is missing"
-            return 'Yes'  # This means something IS missing
+        # "No missing" = No (correct)
+        # But "No, there are missing" would be Yes
+        if 'missing' in text_lower[3:30] and 'no missing' not in text_lower:
+            return 'Yes'
         return 'No'
 
     # Inference from content
-    positive_indicators = ['missing', 'detected', 'found', 'absent', 'lack', 'defect']
-    negative_indicators = ['no missing', 'properly installed', 'all present', 'complete', 'no defect']
-
-    for neg in negative_indicators:
-        if neg in text_lower:
+    # Strong negative indicators (check first)
+    negative_phrases = [
+        'no missing', 'no defect', 'properly installed',
+        'all present', 'all components are present', 'complete structure',
+        'no component', 'all elements'
+    ]
+    for phrase in negative_phrases:
+        if phrase in text_lower:
             return 'No'
 
-    for pos in positive_indicators:
-        if pos in text_lower:
+    # Positive indicators
+    positive_phrases = [
+        'missing', 'detected', 'found', 'absent', 'lack',
+        'defect', 'not present', 'is missing'
+    ]
+    for phrase in positive_phrases:
+        if phrase in text_lower:
             return 'Yes'
 
-    return 'No'  # Default
+    return 'No'  # Default to no missing
 
 
-def parse_component_counts(text: str) -> Dict[str, int]:
-    """Extract component type counts from text."""
+def parse_missing_count_from_text(text: str) -> int:
+    """
+    Parse the number of missing components from answer text.
+
+    Expected format from question_generator.py:
+    "Missing components detected (N total):"
+    "Missing: N vertical post(s):"
+    "N component(s) are missing"
+    """
+    text_lower = text.lower()
+
+    # Pattern 1: "Missing components detected (N total)"
+    match = re.search(r'missing[^(]*\((\d+)\s*total\)', text_lower)
+    if match:
+        return int(match.group(1))
+
+    # Pattern 2: "N component(s) are missing"
+    match = re.search(r'(\d+)\s*component[s]?\s*(?:are|is)?\s*missing', text_lower)
+    if match:
+        return int(match.group(1))
+
+    # Pattern 3: Count bullet points "- Vertical post at..."
+    bullet_count = len(re.findall(r'^-\s+(?:vertical|horizontal|platform)', text_lower, re.MULTILINE))
+    if bullet_count > 0:
+        return bullet_count
+
+    # Pattern 4: "Missing: N"
+    match = re.search(r'missing:\s*(\d+)', text_lower)
+    if match:
+        return int(match.group(1))
+
+    return 0
+
+
+def parse_component_types_from_text(text: str) -> Dict[str, int]:
+    """
+    Parse component types mentioned as missing from text.
+
+    Expected format:
+    "- Vertical post at column X, row Y: [[bbox]]"
+    "- Horizontal beam (X) at floor Z, bay W: [[bbox]]"
+    "- Platform at floor Z, bay W: [[bbox]]"
+    """
     counts = {'vertical': 0, 'horizontal': 0, 'platform': 0}
     text_lower = text.lower()
 
-    # Pattern: "N vertical post(s)" or "N missing vertical"
-    patterns = [
-        (r'(\d+)\s*(?:missing\s+)?vertical', 'vertical'),
-        (r'(\d+)\s*(?:missing\s+)?horizontal', 'horizontal'),
-        (r'(\d+)\s*(?:missing\s+)?platform', 'platform'),
-        (r'vertical[^:]*:\s*(\d+)', 'vertical'),
-        (r'horizontal[^:]*:\s*(\d+)', 'horizontal'),
-        (r'platform[^:]*:\s*(\d+)', 'platform'),
-    ]
-
-    for pattern, comp_type in patterns:
-        matches = re.findall(pattern, text_lower)
-        if matches:
-            counts[comp_type] = max(counts[comp_type], int(matches[-1]))
+    # Count bullet point mentions
+    counts['vertical'] = len(re.findall(r'-\s*vertical\s+post', text_lower))
+    counts['horizontal'] = len(re.findall(r'-\s*horizontal\s+beam', text_lower))
+    counts['platform'] = len(re.findall(r'-\s*platform\s+at', text_lower))
 
     return counts
 
 
-def parse_total_missing_count(text: str) -> int:
-    """Extract total missing component count."""
-    text_lower = text.lower()
+def parse_bboxes_from_text(text: str) -> List[List[List[float]]]:
+    """
+    Extract 3D bounding boxes from text.
 
-    # Pattern: "N missing" or "N component(s) are missing"
-    patterns = [
-        r'(\d+)\s*(?:total|missing|component)',
-        r'missing[^:]*:\s*(\d+)',
-        r'detected\s*\((\d+)',
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            return int(match.group(1))
-
-    # Count from individual types
-    counts = parse_component_counts(text)
-    return sum(counts.values())
-
-
-def parse_bboxes(text: str) -> List[List[List[float]]]:
-    """Extract 3D bounding boxes from text."""
+    Expected format: [[x,y,z], [x,y,z], [x,y,z], [x,y,z], [x,y,z], [x,y,z], [x,y,z], [x,y,z]]
+    """
     bboxes = []
 
-    # Pattern for 8-corner bbox: [[x,y,z], [x,y,z], ...]
-    bbox_pattern = r'\[\s*\[\s*[-\d.]+\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\](?:\s*,\s*\[\s*[-\d.]+\s*,\s*[-\d.]+\s*,\s*[-\d.]+\s*\]){7}\s*\]'
+    # Pattern for 8-corner bbox
+    # More flexible pattern to handle whitespace variations
+    bbox_pattern = r'\[\s*\[[\s\d.,-]+\](?:\s*,\s*\[[\s\d.,-]+\]){7}\s*\]'
 
     matches = re.findall(bbox_pattern, text)
 
     for match in matches:
         try:
-            bbox = json.loads(match.replace(' ', ''))
+            # Clean up and parse
+            clean = re.sub(r'\s+', '', match)
+            bbox = json.loads(clean)
             if len(bbox) == 8 and all(len(corner) == 3 for corner in bbox):
                 bboxes.append(bbox)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError):
             continue
 
     return bboxes
@@ -243,7 +280,7 @@ def parse_bboxes(text: str) -> List[List[List[float]]]:
 # ============================================================================
 
 def compute_iou_3d(box1: BBox3D, box2: BBox3D) -> float:
-    """Compute 3D IoU between two bounding boxes."""
+    """Compute 3D IoU using axis-aligned bounding box approximation."""
     min1, max1 = box1.get_axis_aligned_bounds()
     min2, max2 = box2.get_axis_aligned_bounds()
 
@@ -259,7 +296,7 @@ def compute_iou_3d(box1: BBox3D, box2: BBox3D) -> float:
     return inter_vol / union_vol if union_vol > 0 else 0.0
 
 
-def match_bboxes_greedy(
+def match_bboxes(
     pred_bboxes: List[List[List[float]]],
     gt_bboxes: List[List[List[float]]],
     iou_threshold: float = 0.25
@@ -267,18 +304,29 @@ def match_bboxes_greedy(
     """
     Match predicted boxes to ground truth using greedy algorithm.
 
-    Returns:
-        (ious, num_matched, num_unmatched_gt)
+    Returns: (all_ious, num_true_positive, num_false_positive)
     """
-    if not pred_bboxes or not gt_bboxes:
-        return [], 0, len(gt_bboxes)
+    if not gt_bboxes:
+        # No GT boxes, all predictions are false positives
+        return [], 0, len(pred_bboxes)
+
+    if not pred_bboxes:
+        # No predictions, all GT boxes are missed
+        return [], 0, 0
 
     pred_boxes = [BBox3D.from_list(b) for b in pred_bboxes]
     gt_boxes = [BBox3D.from_list(b) for b in gt_bboxes]
 
+    # Filter out invalid boxes
+    pred_boxes = [b for b in pred_boxes if b is not None]
+    gt_boxes = [b for b in gt_boxes if b is not None]
+
+    if not pred_boxes or not gt_boxes:
+        return [], 0, len(pred_bboxes)
+
     matched_gt = set()
-    ious = []
-    num_matched = 0
+    all_ious = []
+    num_tp = 0
 
     for pred_box in pred_boxes:
         best_iou = 0.0
@@ -293,14 +341,13 @@ def match_bboxes_greedy(
                 best_iou = iou
                 best_gt_idx = gt_idx
 
-        ious.append(best_iou)
+        all_ious.append(best_iou)
         if best_gt_idx >= 0 and best_iou >= iou_threshold:
             matched_gt.add(best_gt_idx)
-            num_matched += 1
+            num_tp += 1
 
-    num_unmatched_gt = len(gt_boxes) - len(matched_gt)
-
-    return ious, num_matched, num_unmatched_gt
+    num_fp = len(pred_boxes) - num_tp
+    return all_ious, num_tp, num_fp
 
 
 # ============================================================================
@@ -311,28 +358,33 @@ def evaluate_detailed(
     predictions: List[Dict],
     ground_truth: List[Dict]
 ) -> DetailedMetrics:
-    """Compute comprehensive evaluation metrics."""
+    """
+    Compute comprehensive evaluation metrics.
 
+    Uses GT's label field directly (not parsed from text).
+    Parses predictions from model output text.
+    """
     gt_lookup = {gt['question_id']: gt for gt in ground_truth}
 
     metrics = DetailedMetrics()
 
     # Accumulators
-    binary_correct = 0
     tp, tn, fp, fn = 0, 0, 0, 0
 
-    # Component type tracking
-    type_correct = {'vertical': 0, 'horizontal': 0, 'platform': 0}
-    type_total = {'vertical': 0, 'horizontal': 0, 'platform': 0}
+    # Component detection tracking
+    comp_gt_counts = {'vertical': 0, 'horizontal': 0, 'platform': 0}
+    comp_pred_correct = {'vertical': 0, 'horizontal': 0, 'platform': 0}
 
     # Count tracking
     count_exact = 0
     count_tol1 = 0
     count_errors = []
+    count_samples = 0
 
     # BBox tracking
     all_ious = []
-    total_matched = 0
+    total_tp_boxes = 0
+    total_fp_boxes = 0
     total_gt_boxes = 0
     total_pred_boxes = 0
 
@@ -340,116 +392,121 @@ def evaluate_detailed(
     task_correct = defaultdict(int)
     task_total = defaultdict(int)
 
-    num_yes = 0
-    num_no = 0
-
     for pred in predictions:
         qid = pred.get('question_id')
         if qid not in gt_lookup:
             continue
 
         gt = gt_lookup[qid]
+
+        # GT values (directly from data, no parsing needed)
         gt_label = gt.get('label', 'No')
         gt_bboxes = gt.get('bboxes', [])
+        gt_answer_text = gt.get('text', '')
         task_type = gt.get('task_type', 'unknown')
 
+        # Prediction values (parsed from model output)
         pred_text = pred.get('text', '')
-        pred_label = parse_yes_no_label(pred_text)
-        pred_bboxes = parse_bboxes(pred_text)
+        pred_label = parse_binary_from_prediction(pred_text, task_type)
+        pred_bboxes = parse_bboxes_from_text(pred_text)
 
         metrics.num_samples += 1
         task_total[task_type] += 1
 
-        # Binary classification
+        # ============ Binary Classification ============
         if pred_label == gt_label:
-            binary_correct += 1
             task_correct[task_type] += 1
 
-        # Confusion matrix
+        # Confusion matrix (Yes = positive = missing detected)
         if gt_label == 'Yes':
-            num_yes += 1
+            metrics.num_yes_gt += 1
             if pred_label == 'Yes':
                 tp += 1
             else:
                 fn += 1
         else:
-            num_no += 1
+            metrics.num_no_gt += 1
             if pred_label == 'No':
                 tn += 1
             else:
                 fp += 1
 
-        # Component type accuracy (for Yes cases)
+        # ============ Component Type Detection ============
+        # Only for summary-type questions with Yes label
         if gt_label == 'Yes' and 'summary' in task_type:
-            gt_counts = parse_component_counts(gt.get('text', ''))
-            pred_counts = parse_component_counts(pred_text)
+            gt_comp = parse_component_types_from_text(gt_answer_text)
+            pred_comp = parse_component_types_from_text(pred_text)
 
             for comp_type in ['vertical', 'horizontal', 'platform']:
-                if gt_counts[comp_type] > 0:
-                    type_total[comp_type] += 1
-                    if pred_counts[comp_type] == gt_counts[comp_type]:
-                        type_correct[comp_type] += 1
+                gt_count = gt_comp[comp_type]
+                pred_count = pred_comp[comp_type]
 
-        # Count accuracy
+                if gt_count > 0:
+                    comp_gt_counts[comp_type] += gt_count
+                    # Count how many the model correctly identified
+                    comp_pred_correct[comp_type] += min(pred_count, gt_count)
+
+        # ============ Count Accuracy ============
         if gt_label == 'Yes':
-            gt_count = parse_total_missing_count(gt.get('text', ''))
-            pred_count = parse_total_missing_count(pred_text)
+            gt_count = parse_missing_count_from_text(gt_answer_text)
+            pred_count = parse_missing_count_from_text(pred_text)
 
             if gt_count > 0:
-                if pred_count == gt_count:
-                    count_exact += 1
-                if abs(pred_count - gt_count) <= 1:
-                    count_tol1 += 1
-                count_errors.append(abs(pred_count - gt_count))
+                count_samples += 1
+                error = abs(pred_count - gt_count)
+                count_errors.append(error)
 
-        # BBox evaluation
+                if error == 0:
+                    count_exact += 1
+                if error <= 1:
+                    count_tol1 += 1
+
+        # ============ BBox IoU ============
         total_pred_boxes += len(pred_bboxes)
         total_gt_boxes += len(gt_bboxes)
 
-        if gt_bboxes and pred_bboxes:
-            ious, matched, _ = match_bboxes_greedy(pred_bboxes, gt_bboxes)
+        if gt_bboxes:
+            ious, tp_boxes, fp_boxes = match_bboxes(pred_bboxes, gt_bboxes)
             all_ious.extend(ious)
-            total_matched += matched
+            total_tp_boxes += tp_boxes
+            total_fp_boxes += fp_boxes
 
-    # Calculate final metrics
+    # ============ Calculate Final Metrics ============
     n = metrics.num_samples
-    metrics.num_yes_samples = num_yes
-    metrics.num_no_samples = num_no
 
-    # Binary
-    metrics.binary_accuracy = (binary_correct / n * 100) if n > 0 else 0
+    # Binary classification
     metrics.true_positive = tp
     metrics.true_negative = tn
     metrics.false_positive = fp
     metrics.false_negative = fn
 
+    metrics.binary_accuracy = ((tp + tn) / n * 100) if n > 0 else 0
     metrics.precision = (tp / (tp + fp) * 100) if (tp + fp) > 0 else 0
     metrics.recall = (tp / (tp + fn) * 100) if (tp + fn) > 0 else 0
-    metrics.f1_score = (2 * metrics.precision * metrics.recall /
-                        (metrics.precision + metrics.recall)) if (metrics.precision + metrics.recall) > 0 else 0
 
-    # Component type
+    if metrics.precision + metrics.recall > 0:
+        metrics.f1_score = (2 * metrics.precision * metrics.recall /
+                           (metrics.precision + metrics.recall))
+
+    # Component detection rates
     for comp_type in ['vertical', 'horizontal', 'platform']:
-        if type_total[comp_type] > 0:
-            acc = type_correct[comp_type] / type_total[comp_type] * 100
-            setattr(metrics, f'{comp_type}_accuracy', acc)
+        if comp_gt_counts[comp_type] > 0:
+            rate = comp_pred_correct[comp_type] / comp_gt_counts[comp_type] * 100
+            setattr(metrics, f'{comp_type}_detection_rate', rate)
 
-    valid_types = [v for v in type_total.values() if v > 0]
-    if valid_types:
-        metrics.component_type_avg_accuracy = np.mean([
-            type_correct[t] / type_total[t] * 100
-            for t in type_total if type_total[t] > 0
-        ])
+    total_comp_gt = sum(comp_gt_counts.values())
+    total_comp_correct = sum(comp_pred_correct.values())
+    if total_comp_gt > 0:
+        metrics.component_detection_accuracy = total_comp_correct / total_comp_gt * 100
 
-    # Count
-    count_samples = num_yes
+    # Count accuracy
     if count_samples > 0:
         metrics.count_exact_accuracy = count_exact / count_samples * 100
         metrics.count_tolerance1_accuracy = count_tol1 / count_samples * 100
     if count_errors:
         metrics.count_mae = np.mean(count_errors)
 
-    # BBox
+    # BBox metrics
     metrics.num_pred_boxes = total_pred_boxes
     metrics.num_gt_boxes = total_gt_boxes
 
@@ -459,11 +516,11 @@ def evaluate_detailed(
         metrics.bbox_iou_at_25 = sum(1 for iou in all_ious if iou >= 0.25) / len(all_ious) * 100
 
     if total_gt_boxes > 0:
-        metrics.bbox_detection_rate = total_matched / total_gt_boxes * 100
+        metrics.bbox_detection_rate = total_tp_boxes / total_gt_boxes * 100
     if total_pred_boxes > 0:
-        metrics.bbox_precision = total_matched / total_pred_boxes * 100
+        metrics.bbox_false_positive_rate = total_fp_boxes / total_pred_boxes * 100
 
-    # Per-task
+    # Per-task accuracy
     metrics.per_task_accuracy = {
         task: (task_correct[task] / task_total[task] * 100) if task_total[task] > 0 else 0
         for task in task_total
@@ -473,170 +530,60 @@ def evaluate_detailed(
 
 
 # ============================================================================
-# Ablation Studies
+# Ablation Study Support
 # ============================================================================
 
-def run_ablation_study(
-    model_inference_fn,  # Function to run inference
-    test_data: List[Dict],
-    ablation_dir: str
-) -> List[AblationResult]:
+def check_data_leakage(
+    main_metrics: DetailedMetrics,
+    ablation_noise_acc: Optional[float] = None
+) -> Tuple[bool, List[str]]:
     """
-    Run ablation studies to verify no data leakage.
+    Check for data leakage indicators.
 
-    Expected behavior:
-    - noise: ~50% (random guessing)
-    - shuffled: Similar to normal (point order invariant)
-    - cross: Significantly lower (wrong point cloud)
-    """
-    results = []
-
-    ablation_configs = [
-        {
-            'name': 'noise',
-            'dir': os.path.join(ablation_dir, 'ablation_noise'),
-            'expected': (45, 55),  # Should be ~50% (random)
-            'interpretation': 'Random noise should yield ~50% accuracy. Higher suggests text-based shortcuts.'
-        },
-        {
-            'name': 'shuffled',
-            'dir': os.path.join(ablation_dir, 'ablation_shuffled'),
-            'expected': (60, 100),  # Should be similar to normal
-            'interpretation': 'Point order shuffle should not significantly affect accuracy.'
-        },
-        {
-            'name': 'cross',
-            'dir': os.path.join(ablation_dir, 'ablation_cross'),
-            'expected': (40, 60),  # Should be lower
-            'interpretation': 'Wrong scaffold should yield lower accuracy than normal.'
-        }
-    ]
-
-    for config in ablation_configs:
-        if not os.path.exists(config['dir']):
-            continue
-
-        # This would run inference on ablation data
-        # For now, we'll check if pre-computed results exist
-        ablation_pred_path = os.path.join(config['dir'], 'predictions.jsonl')
-
-        if os.path.exists(ablation_pred_path):
-            ablation_preds = load_jsonl(ablation_pred_path)
-            ablation_gt = load_jsonl(os.path.join(config['dir'], 'ground_truth.jsonl'))
-
-            metrics = evaluate_detailed(ablation_preds, ablation_gt)
-            acc = metrics.binary_accuracy
-
-            passed = config['expected'][0] <= acc <= config['expected'][1]
-
-            results.append(AblationResult(
-                condition=config['name'],
-                binary_accuracy=acc,
-                expected_range=config['expected'],
-                passed=passed,
-                interpretation=config['interpretation']
-            ))
-
-    return results
-
-
-def check_data_leakage(main_accuracy: float, ablation_results: List[AblationResult]) -> Tuple[bool, List[str]]:
-    """
-    Check for data leakage based on ablation results.
-
-    Returns:
-        (leakage_detected, warnings)
+    Red flags:
+    1. Very high binary accuracy (>95%) with very low IoU (<5%)
+    2. Noise ablation accuracy significantly above 50%
     """
     warnings = []
     leakage_detected = False
 
-    # Check 1: If noise ablation has high accuracy
-    noise_result = next((r for r in ablation_results if r.condition == 'noise'), None)
-    if noise_result and noise_result.binary_accuracy > 60:
+    # Check 1: High accuracy with low IoU mismatch
+    if main_metrics.binary_accuracy > 95 and main_metrics.bbox_iou_at_25 < 5:
         leakage_detected = True
         warnings.append(
-            f"DATA LEAKAGE WARNING: Noise ablation accuracy is {noise_result.binary_accuracy:.1f}%, "
-            f"expected ~50%. Model may be using text patterns instead of point cloud."
+            f"DATA LEAKAGE SUSPECTED: Binary accuracy is {main_metrics.binary_accuracy:.1f}% "
+            f"but BBox IoU@0.25 is only {main_metrics.bbox_iou_at_25:.1f}%. "
+            f"Model may be using text shortcuts instead of analyzing point clouds."
         )
 
-    # Check 2: If main accuracy is suspiciously high
-    if main_accuracy > 95:
+    # Check 2: Noise ablation
+    if ablation_noise_acc is not None and ablation_noise_acc > 60:
+        leakage_detected = True
         warnings.append(
-            f"SUSPICION: Main accuracy is {main_accuracy:.1f}%, which is unusually high. "
-            f"Verify with ablation studies."
+            f"DATA LEAKAGE CONFIRMED: Noise ablation accuracy is {ablation_noise_acc:.1f}%, "
+            f"expected ~50% for random point clouds. Model is not using visual information."
         )
 
-    # Check 3: Cross-scaffold should be significantly lower
-    cross_result = next((r for r in ablation_results if r.condition == 'cross'), None)
-    if cross_result:
-        if cross_result.binary_accuracy > main_accuracy - 10:
-            warnings.append(
-                f"WARNING: Cross-scaffold accuracy ({cross_result.binary_accuracy:.1f}%) is too close to "
-                f"main accuracy ({main_accuracy:.1f}%). Model may not be using point cloud properly."
-            )
+    # Check 3: Suspiciously perfect accuracy
+    if main_metrics.binary_accuracy > 99:
+        warnings.append(
+            f"WARNING: Binary accuracy of {main_metrics.binary_accuracy:.1f}% is suspiciously high. "
+            f"Please verify with ablation studies."
+        )
 
     return leakage_detected, warnings
-
-
-# ============================================================================
-# GPT Evaluation (Optional)
-# ============================================================================
-
-def gpt_evaluate_sample(
-    question: str,
-    pred_answer: str,
-    gt_answer: str,
-    api_key: str,
-    model: str = "gpt-3.5-turbo"
-) -> float:
-    """Use GPT to evaluate semantic similarity between pred and GT."""
-    if not HAS_OPENAI:
-        return -1.0
-
-    openai.api_key = api_key
-
-    prompt = f"""Evaluate how well the model's answer matches the ground truth for this scaffold inspection question.
-
-Question: {question}
-Ground Truth: {gt_answer}
-Model Answer: {pred_answer}
-
-Score from 0-100:
-- 100: Perfect match in meaning
-- 80-99: Correct answer with minor differences
-- 60-79: Partially correct
-- 40-59: Some relevant information but significant errors
-- 20-39: Mostly incorrect
-- 0-19: Completely wrong
-
-Return ONLY a number between 0 and 100."""
-
-    try:
-        response = openai.ChatCompletion.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are an expert evaluator for 3D scaffold inspection tasks."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1
-        )
-        score_text = response.choices[0].message['content'].strip()
-        return float(score_text)
-    except Exception as e:
-        print(f"GPT evaluation error: {e}")
-        return -1.0
 
 
 # ============================================================================
 # Reporting
 # ============================================================================
 
-def print_detailed_report(report: EvaluationReport):
+def print_evaluation_report(report: EvaluationReport):
     """Print comprehensive evaluation report."""
     m = report.main_metrics
 
     print("\n" + "=" * 80)
-    print(" SCAFFOLD MISSING DETECTION - EVALUATION REPORT")
+    print(" SCAFFOLD MISSING DETECTION - RIGOROUS EVALUATION REPORT")
     print(f" Generated: {report.timestamp}")
     print("=" * 80)
 
@@ -644,132 +591,119 @@ def print_detailed_report(report: EvaluationReport):
     if report.data_leakage_detected:
         print("\n⚠️  DATA LEAKAGE DETECTED - Results may be invalid!")
     else:
-        print("\n✓ No data leakage detected")
+        print("\n✓ No obvious data leakage detected")
 
     # Binary Classification
-    print("\n" + "-" * 40)
-    print(" 1. BINARY CLASSIFICATION (Yes/No)")
-    print("-" * 40)
+    print("\n" + "-" * 50)
+    print(" 1. BINARY CLASSIFICATION")
+    print("-" * 50)
     print(f"  Accuracy:  {m.binary_accuracy:.2f}%")
     print(f"  Precision: {m.precision:.2f}%")
     print(f"  Recall:    {m.recall:.2f}%")
     print(f"  F1 Score:  {m.f1_score:.2f}%")
     print(f"\n  Confusion Matrix:")
-    print(f"    TP: {m.true_positive:4d}  |  FP: {m.false_positive:4d}")
-    print(f"    FN: {m.false_negative:4d}  |  TN: {m.true_negative:4d}")
-    print(f"\n  Samples: {m.num_samples} (Yes: {m.num_yes_samples}, No: {m.num_no_samples})")
+    print(f"              Predicted")
+    print(f"              Yes    No")
+    print(f"    Actual Yes {m.true_positive:4d}  {m.false_negative:4d}")
+    print(f"           No  {m.false_positive:4d}  {m.true_negative:4d}")
+    print(f"\n  GT Distribution: Yes={m.num_yes_gt}, No={m.num_no_gt}")
 
-    # Component Type Accuracy
-    print("\n" + "-" * 40)
-    print(" 2. COMPONENT TYPE ACCURACY")
-    print("-" * 40)
-    print(f"  Vertical:   {m.vertical_accuracy:.2f}%")
-    print(f"  Horizontal: {m.horizontal_accuracy:.2f}%")
-    print(f"  Platform:   {m.platform_accuracy:.2f}%")
-    print(f"  Average:    {m.component_type_avg_accuracy:.2f}%")
+    # Component Detection
+    print("\n" + "-" * 50)
+    print(" 2. COMPONENT TYPE DETECTION")
+    print("-" * 50)
+    print(f"  Overall:    {m.component_detection_accuracy:.2f}%")
+    print(f"  Vertical:   {m.vertical_detection_rate:.2f}%")
+    print(f"  Horizontal: {m.horizontal_detection_rate:.2f}%")
+    print(f"  Platform:   {m.platform_detection_rate:.2f}%")
 
     # Count Accuracy
-    print("\n" + "-" * 40)
+    print("\n" + "-" * 50)
     print(" 3. COUNT ACCURACY")
-    print("-" * 40)
-    print(f"  Exact Match:    {m.count_exact_accuracy:.2f}%")
-    print(f"  ±1 Tolerance:   {m.count_tolerance1_accuracy:.2f}%")
+    print("-" * 50)
+    print(f"  Exact Match: {m.count_exact_accuracy:.2f}%")
+    print(f"  ±1 Tolerance: {m.count_tolerance1_accuracy:.2f}%")
     print(f"  Mean Abs Error: {m.count_mae:.2f}")
 
     # BBox Grounding
-    print("\n" + "-" * 40)
+    print("\n" + "-" * 50)
     print(" 4. BOUNDING BOX GROUNDING")
-    print("-" * 40)
+    print("-" * 50)
     print(f"  Mean IoU:       {m.bbox_iou_mean:.2f}%")
     print(f"  IoU@0.50:       {m.bbox_iou_at_50:.2f}%")
     print(f"  IoU@0.25:       {m.bbox_iou_at_25:.2f}%")
     print(f"  Detection Rate: {m.bbox_detection_rate:.2f}%")
-    print(f"  Precision:      {m.bbox_precision:.2f}%")
-    print(f"  (Pred: {m.num_pred_boxes}, GT: {m.num_gt_boxes})")
+    print(f"  False Pos Rate: {m.bbox_false_positive_rate:.2f}%")
+    print(f"  (Predicted: {m.num_pred_boxes}, GT: {m.num_gt_boxes})")
 
-    # Per-Task Accuracy
+    # Per-Task
     if m.per_task_accuracy:
-        print("\n" + "-" * 40)
-        print(" 5. PER-TASK ACCURACY")
-        print("-" * 40)
+        print("\n" + "-" * 50)
+        print(" 5. PER-TASK BINARY ACCURACY")
+        print("-" * 50)
         for task, acc in sorted(m.per_task_accuracy.items()):
             print(f"  {task}: {acc:.2f}%")
 
-    # Ablation Results
-    if report.ablation_results:
-        print("\n" + "-" * 40)
-        print(" 6. ABLATION STUDIES")
-        print("-" * 40)
-        for abl in report.ablation_results:
-            status = "✓ PASS" if abl.passed else "✗ FAIL"
-            print(f"  {abl.condition}: {abl.binary_accuracy:.2f}% "
-                  f"(expected: {abl.expected_range[0]}-{abl.expected_range[1]}%) [{status}]")
-            print(f"    → {abl.interpretation}")
-
     # Warnings
     if report.warnings:
-        print("\n" + "-" * 40)
+        print("\n" + "-" * 50)
         print(" ⚠️  WARNINGS")
-        print("-" * 40)
+        print("-" * 50)
         for w in report.warnings:
             print(f"  • {w}")
-
-    # Recommendations
-    if report.recommendations:
-        print("\n" + "-" * 40)
-        print(" 📋 RECOMMENDATIONS")
-        print("-" * 40)
-        for r in report.recommendations:
-            print(f"  • {r}")
 
     print("\n" + "=" * 80)
 
 
-def generate_latex_table(report: EvaluationReport, output_path: str):
-    """Generate LaTeX table for paper."""
+def save_results(report: EvaluationReport, output_dir: str):
+    """Save evaluation results."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    # JSON report
+    report_dict = {
+        'timestamp': report.timestamp,
+        'data_leakage_detected': report.data_leakage_detected,
+        'main_metrics': asdict(report.main_metrics),
+        'ablation_results': [asdict(a) for a in report.ablation_results],
+        'warnings': report.warnings,
+        'recommendations': report.recommendations
+    }
+
+    with open(os.path.join(output_dir, 'evaluation_report.json'), 'w') as f:
+        json.dump(report_dict, f, indent=2)
+
+    # LaTeX table
     m = report.main_metrics
+    latex = f"""\\begin{{table}}[h]
+\\centering
+\\caption{{Scaffold Missing Detection Results}}
+\\begin{{tabular}}{{lc}}
+\\toprule
+\\textbf{{Metric}} & \\textbf{{Value}} \\\\
+\\midrule
+Binary Accuracy & {m.binary_accuracy:.2f}\\% \\\\
+Precision & {m.precision:.2f}\\% \\\\
+Recall & {m.recall:.2f}\\% \\\\
+F1 Score & {m.f1_score:.2f}\\% \\\\
+\\midrule
+Component Detection & {m.component_detection_accuracy:.2f}\\% \\\\
+Count Exact Match & {m.count_exact_accuracy:.2f}\\% \\\\
+\\midrule
+BBox IoU@0.50 & {m.bbox_iou_at_50:.2f}\\% \\\\
+BBox IoU@0.25 & {m.bbox_iou_at_25:.2f}\\% \\\\
+BBox Detection Rate & {m.bbox_detection_rate:.2f}\\% \\\\
+\\bottomrule
+\\end{{tabular}}
+\\end{{table}}"""
 
-    latex = r"""
-\begin{table}[h]
-\centering
-\caption{Scaffold Missing Detection Results}
-\label{tab:results}
-\begin{tabular}{lcc}
-\toprule
-\textbf{Metric} & \textbf{Value} & \textbf{Note} \\
-\midrule
-\multicolumn{3}{l}{\textit{Binary Classification}} \\
-Accuracy & %.2f\%% & \\
-Precision & %.2f\%% & \\
-Recall & %.2f\%% & \\
-F1 Score & %.2f\%% & \\
-\midrule
-\multicolumn{3}{l}{\textit{Component Type}} \\
-Vertical Accuracy & %.2f\%% & \\
-Horizontal Accuracy & %.2f\%% & \\
-Platform Accuracy & %.2f\%% & \\
-\midrule
-\multicolumn{3}{l}{\textit{BBox Grounding}} \\
-Mean IoU & %.2f\%% & \\
-IoU@0.50 & %.2f\%% & \\
-IoU@0.25 & %.2f\%% & \\
-\bottomrule
-\end{tabular}
-\end{table}
-""" % (
-        m.binary_accuracy, m.precision, m.recall, m.f1_score,
-        m.vertical_accuracy, m.horizontal_accuracy, m.platform_accuracy,
-        m.bbox_iou_mean, m.bbox_iou_at_50, m.bbox_iou_at_25
-    )
-
-    with open(output_path, 'w') as f:
+    with open(os.path.join(output_dir, 'results_table.tex'), 'w') as f:
         f.write(latex)
 
-    print(f"LaTeX table saved to: {output_path}")
+    print(f"\nResults saved to: {output_dir}")
 
 
 # ============================================================================
-# Utility Functions
+# Utility
 # ============================================================================
 
 def load_jsonl(path: str) -> List[Dict]:
@@ -783,29 +717,6 @@ def load_jsonl(path: str) -> List[Dict]:
     return data
 
 
-def save_report(report: EvaluationReport, output_dir: str):
-    """Save evaluation report to files."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    # JSON report
-    report_dict = {
-        'timestamp': report.timestamp,
-        'main_metrics': asdict(report.main_metrics),
-        'ablation_results': [asdict(a) for a in report.ablation_results],
-        'data_leakage_detected': report.data_leakage_detected,
-        'warnings': report.warnings,
-        'recommendations': report.recommendations
-    }
-
-    with open(os.path.join(output_dir, 'evaluation_report.json'), 'w') as f:
-        json.dump(report_dict, f, indent=2)
-
-    # LaTeX table
-    generate_latex_table(report, os.path.join(output_dir, 'results_table.tex'))
-
-    print(f"\nResults saved to: {output_dir}")
-
-
 # ============================================================================
 # Main
 # ============================================================================
@@ -816,21 +727,15 @@ def main():
                        help='Path to predictions JSONL')
     parser.add_argument('--ground-truth', type=str, required=True,
                        help='Path to ground truth JSONL')
-    parser.add_argument('--ablation-dir', type=str, default=None,
-                       help='Directory containing ablation data')
     parser.add_argument('--output-dir', type=str, default='./evaluation_results',
                        help='Output directory')
-    parser.add_argument('--quick', action='store_true',
-                       help='Skip ablation studies')
-    parser.add_argument('--gpt-eval', action='store_true',
-                       help='Enable GPT-based evaluation')
-    parser.add_argument('--openai-key', type=str, default=None,
-                       help='OpenAI API key for GPT evaluation')
+    parser.add_argument('--ablation-noise-predictions', type=str, default=None,
+                       help='Path to noise ablation predictions for leakage check')
 
     args = parser.parse_args()
 
     print("=" * 80)
-    print(" RIGOROUS ACADEMIC EVALUATION")
+    print(" RIGOROUS ACADEMIC EVALUATION - FIXED VERSION")
     print("=" * 80)
 
     # Load data
@@ -843,34 +748,29 @@ def main():
     print(f"Loaded {len(predictions)} predictions, {len(ground_truth)} ground truth")
 
     # Main evaluation
-    print("\nRunning main evaluation...")
+    print("\nRunning evaluation...")
     main_metrics = evaluate_detailed(predictions, ground_truth)
 
-    # Ablation studies
+    # Ablation check
     ablation_results = []
-    if not args.quick and args.ablation_dir:
-        print("\nRunning ablation studies...")
-        # Note: This requires pre-computed ablation predictions
-        # In practice, you would run inference on ablation data first
-        ablation_results = run_ablation_study(None, ground_truth, args.ablation_dir)
+    ablation_noise_acc = None
+
+    if args.ablation_noise_predictions and os.path.exists(args.ablation_noise_predictions):
+        print("\nRunning noise ablation check...")
+        noise_preds = load_jsonl(args.ablation_noise_predictions)
+        noise_metrics = evaluate_detailed(noise_preds, ground_truth)
+        ablation_noise_acc = noise_metrics.binary_accuracy
+
+        ablation_results.append(AblationResult(
+            condition='noise',
+            binary_accuracy=ablation_noise_acc,
+            expected_range=(45, 55),
+            passed=45 <= ablation_noise_acc <= 55,
+            interpretation='Random noise should yield ~50% accuracy'
+        ))
 
     # Check for data leakage
-    leakage_detected, warnings = check_data_leakage(
-        main_metrics.binary_accuracy, ablation_results
-    )
-
-    # Generate recommendations
-    recommendations = []
-    if main_metrics.bbox_iou_at_50 < 10:
-        recommendations.append(
-            "BBox IoU is very low. Consider: (1) Check bbox format in answers, "
-            "(2) Increase training data, (3) Add bbox-specific training objective."
-        )
-    if main_metrics.binary_accuracy > 90 and main_metrics.bbox_iou_at_50 < 20:
-        recommendations.append(
-            "High binary accuracy with low IoU suggests the model may be learning "
-            "classification shortcuts. Review question templates for data leakage."
-        )
+    leakage_detected, warnings = check_data_leakage(main_metrics, ablation_noise_acc)
 
     # Create report
     report = EvaluationReport(
@@ -878,13 +778,12 @@ def main():
         main_metrics=main_metrics,
         ablation_results=ablation_results,
         data_leakage_detected=leakage_detected,
-        warnings=warnings,
-        recommendations=recommendations
+        warnings=warnings
     )
 
-    # Print and save
-    print_detailed_report(report)
-    save_report(report, args.output_dir)
+    # Output
+    print_evaluation_report(report)
+    save_results(report, args.output_dir)
 
     print("\n✓ Evaluation complete!")
 

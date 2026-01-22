@@ -12,9 +12,15 @@ Usage:
     python tools/gpt_evaluate_scaffold.py \
         --predictions ./outputs/test_answers.jsonl \
         --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+        --questions ./playground/data/shapellm/scaffold_v2/test_questions.jsonl \
         --output-dir ./evaluation_results \
         --openai-key YOUR_API_KEY \
         --model gpt-4
+
+Data Format Expected:
+    - predictions: {question_id, text: <model_output>, ...}
+    - ground-truth: {question_id, text: <gt_answer>, label, task_type, ...}
+    - questions: {question_id, text: <question_text>, category, ...}
 
 Based on ShapeLLM's gpt_eval.py and eval_3dmmvet.py
 """
@@ -80,9 +86,10 @@ EVALUATION_PROMPT_TEMPLATE = """Evaluate the model's answer against the ground t
 
 Evaluate on these criteria (0-100 each):
 
-1. **Binary Detection** (0-100): Did the model correctly identify if there are missing components?
-   - 100: Correct Yes/No answer
-   - 0: Wrong Yes/No answer
+1. **Binary Detection** (0 or 100 ONLY): Did the model correctly identify if there are missing components?
+   - 100: Correct Yes/No answer (model's answer matches ground truth on presence/absence)
+   - 0: Wrong Yes/No answer (model said Yes when GT says No, or vice versa)
+   - IMPORTANT: Only use 0 or 100 for this category, no intermediate values
 
 2. **Component Type** (0-100): Did the model correctly identify the types of missing components?
    - 100: All component types correct (vertical/horizontal/platform)
@@ -399,6 +406,7 @@ def evaluate_batch_parallel(
 def run_gpt_evaluation(
     predictions_path: str,
     ground_truth_path: str,
+    questions_path: str,
     output_dir: str,
     api_key: str,
     model: str = "gpt-3.5-turbo",
@@ -406,41 +414,75 @@ def run_gpt_evaluation(
     detailed: bool = True,
     max_workers: int = 4
 ) -> GPTEvalSummary:
-    """Run full GPT evaluation pipeline."""
+    """Run full GPT evaluation pipeline.
+
+    Args:
+        predictions_path: Path to model predictions JSONL (question_id, text=model_output)
+        ground_truth_path: Path to ground truth JSONL (question_id, text=gt_answer, label, task_type)
+        questions_path: Path to questions JSONL (question_id, text=question_text, category)
+        output_dir: Directory for output files
+        api_key: OpenAI API key
+        model: GPT model to use
+        max_samples: Limit number of samples (for testing)
+        detailed: Use detailed 5-category scoring vs simple scoring
+        max_workers: Parallel workers for API calls
+    """
 
     if not HAS_OPENAI:
         raise ImportError("openai package is required. Install with: pip install openai")
 
     openai.api_key = api_key
 
-    # Load data
+    # Load data - predictions
     print(f"Loading predictions from: {predictions_path}")
     with open(predictions_path, 'r') as f:
         predictions = [json.loads(line) for line in f if line.strip()]
 
+    # Load data - ground truth (contains answer text, label, task_type)
     print(f"Loading ground truth from: {ground_truth_path}")
     with open(ground_truth_path, 'r') as f:
         ground_truth = [json.loads(line) for line in f if line.strip()]
 
-    # Build GT lookup
+    # Load data - questions (contains question text)
+    print(f"Loading questions from: {questions_path}")
+    with open(questions_path, 'r') as f:
+        questions = [json.loads(line) for line in f if line.strip()]
+
+    # Build lookups by question_id
     gt_lookup = {gt['question_id']: gt for gt in ground_truth}
+    question_lookup = {q['question_id']: q for q in questions}
+
+    print(f"  Predictions: {len(predictions)}")
+    print(f"  Ground truth: {len(ground_truth)}")
+    print(f"  Questions: {len(questions)}")
 
     # Prepare samples for evaluation
     samples = []
+    missing_count = 0
     for pred in predictions:
         qid = pred.get('question_id')
+
+        # Check both GT and question exist
         if qid not in gt_lookup:
+            missing_count += 1
+            continue
+        if qid not in question_lookup:
+            missing_count += 1
             continue
 
         gt = gt_lookup[qid]
+        q = question_lookup[qid]
 
         samples.append({
             'question_id': qid,
-            'question': gt.get('text', ''),
-            'gt_answer': gt.get('text', ''),  # Using text field from GT
-            'pred_answer': pred.get('text', ''),
+            'question': q.get('text', ''),        # Question text from questions file
+            'gt_answer': gt.get('text', ''),      # GT answer from ground truth file
+            'pred_answer': pred.get('text', ''),  # Model output from predictions file
             'task_type': gt.get('task_type', 'unknown')
         })
+
+    if missing_count > 0:
+        print(f"  Warning: {missing_count} predictions missing from GT/questions")
 
     if max_samples:
         samples = samples[:max_samples]
@@ -501,11 +543,30 @@ def run_gpt_evaluation(
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description='GPT-based Scaffold Evaluation')
+    parser = argparse.ArgumentParser(
+        description='GPT-based Scaffold Evaluation',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Example usage:
+    python tools/gpt_evaluate_scaffold.py \\
+        --predictions ./outputs/test_answers.jsonl \\
+        --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \\
+        --questions ./playground/data/shapellm/scaffold_v2/test_questions.jsonl \\
+        --output-dir ./evaluation_results \\
+        --openai-key YOUR_API_KEY
+
+Data format:
+    - predictions: {"question_id": "...", "text": "<model_output>", ...}
+    - ground-truth: {"question_id": "...", "text": "<gt_answer>", "label": "Yes/No", "task_type": "...", ...}
+    - questions: {"question_id": "...", "text": "<question_text>", "category": "scaffold", ...}
+        """
+    )
     parser.add_argument('--predictions', type=str, required=True,
-                       help='Path to predictions JSONL')
+                       help='Path to predictions JSONL (model outputs)')
     parser.add_argument('--ground-truth', type=str, required=True,
-                       help='Path to ground truth JSONL')
+                       help='Path to ground truth JSONL (GT answers)')
+    parser.add_argument('--questions', type=str, required=True,
+                       help='Path to questions JSONL (question text)')
     parser.add_argument('--output-dir', type=str, default='./evaluation_results',
                        help='Output directory')
     parser.add_argument('--openai-key', type=str, required=True,
@@ -525,6 +586,7 @@ def main():
     run_gpt_evaluation(
         predictions_path=args.predictions,
         ground_truth_path=args.ground_truth,
+        questions_path=args.questions,
         output_dir=args.output_dir,
         api_key=args.openai_key,
         model=args.model,

@@ -272,6 +272,7 @@ evaluation_results/
 python tools/gpt_evaluate_scaffold.py \
     --predictions ./outputs/test_answers.jsonl \
     --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+    --questions ./playground/data/shapellm/scaffold_v2/test_questions.jsonl \
     --output-dir ./evaluation_results \
     --openai-key YOUR_OPENAI_API_KEY \
     --model gpt-4
@@ -280,6 +281,7 @@ python tools/gpt_evaluate_scaffold.py \
 python tools/gpt_evaluate_scaffold.py \
     --predictions ./outputs/test_answers.jsonl \
     --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+    --questions ./playground/data/shapellm/scaffold_v2/test_questions.jsonl \
     --output-dir ./evaluation_results \
     --openai-key YOUR_OPENAI_API_KEY \
     --model gpt-3.5-turbo \
@@ -289,6 +291,7 @@ python tools/gpt_evaluate_scaffold.py \
 python tools/gpt_evaluate_scaffold.py \
     --predictions ./outputs/test_answers.jsonl \
     --ground-truth ./playground/data/shapellm/scaffold_v2/test_gt.jsonl \
+    --questions ./playground/data/shapellm/scaffold_v2/test_questions.jsonl \
     --output-dir ./evaluation_results \
     --openai-key YOUR_OPENAI_API_KEY \
     --max-samples 50
