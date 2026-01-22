@@ -22,6 +22,12 @@
 # Environment: 4x RTX 3090 (24GB each)
 # Effective batch size: 2 * 8 * 4 = 64
 #
+# Epoch strategy for small dataset (2,100 samples):
+#   - Original ShapeLLM: 785K samples × 1 epoch
+#   - Our data: 2,100 samples × 15 epochs = ~500 effective steps
+#   - This allows proper convergence without severe overfitting
+#   - Checkpoints saved every 100 steps for manual selection
+#
 # ==============================================================================
 
 set -e
@@ -75,14 +81,14 @@ deepspeed llava/train/train_mem.py \
     --prompt_token_num 32 \
     --bf16 True \
     --output_dir $OUTPUT_DIR \
-    --num_train_epochs 1 \
+    --num_train_epochs 15 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 8 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 200 \
-    --save_total_limit 3 \
+    --save_steps 100 \
+    --save_total_limit 5 \
     --learning_rate 1e-3 \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
