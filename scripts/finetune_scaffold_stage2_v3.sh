@@ -61,7 +61,9 @@ fi
 if [ ! -f "$DATA_PATH" ]; then
     echo "ERROR: Training data not found at ${DATA_PATH}"
     echo "Please generate V3 data first:"
-    echo "  python tools/generate_scaffold_data_v3.py --num_scenes 2000"
+    echo "  python -m tools.scaffold_data_pipeline.main \\"
+    echo "      --num-scenes 2000 \\"
+    echo "      --output-dir ./playground/data/shapellm/scaffold_v3"
     exit 1
 fi
 
