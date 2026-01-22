@@ -42,6 +42,10 @@ PCS_PATH="./playground/data/shapellm/scaffold_v2/pcs"
 
 # Output directory
 OUTPUT_DIR="./checkpoints/${OUTPUT_NAME}"
+LOG_DIR="./logs/${OUTPUT_NAME}"
+
+# Create log directory for tensorboard
+mkdir -p $LOG_DIR
 
 echo "=============================================================="
 echo "Stage 1: Feature Alignment Training (3090 x 4)"
@@ -99,7 +103,8 @@ deepspeed llava/train/train_mem.py \
     --gradient_checkpointing True \
     --dataloader_num_workers 2 \
     --lazy_preprocess True \
-    --report_to none
+    --report_to tensorboard \
+    --logging_dir $LOG_DIR
 
 echo "=============================================================="
 echo "Stage 1 Training Complete!"
