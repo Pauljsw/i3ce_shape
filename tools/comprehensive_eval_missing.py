@@ -800,9 +800,9 @@ class ComprehensiveMissingEvaluator:
         print(f"   Samples:  {results['task2_component_type']['used_samples']}")
 
         print(f"\n🎯 Task 3 - BBox Grounding (어디서? - 3D 좌표):")
-        print(f"   Mean IoU:      {results['task3_bbox_grounding']['mean_iou']:.4f}")
-        print(f"   Precision@0.5: {results['task3_bbox_grounding']['precision@0.5']*100:.2f}%")
-        print(f"   Samples:       {results['task3_bbox_grounding']['used_samples']}")
+        print(f"   Mean IoU:          {results['task3_bbox_grounding']['mean_iou']:.4f}")
+        print(f"   Success Rate@0.5:  {results['task3_bbox_grounding']['success_rate@0.5']*100:.2f}%")
+        print(f"   Samples:           {results['task3_bbox_grounding']['used_samples']}")
 
         print(f"\n✅ Task 4 - Counting (몇 개?):")
         print(f"   MAE:          {results['task4_counting']['mae']:.3f}")
