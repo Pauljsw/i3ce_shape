@@ -315,7 +315,9 @@ class EnhancedScaffoldGenerator:
 
                 for angle in angles:
                     offset = radius * (np.cos(angle) * perpendicular + np.sin(angle) * perpendicular2)
-                    points.append(center + offset)
+                    # Add small noise for natural variation
+                    noise = np.random.normal(0, 0.005, 3)
+                    points.append(center + offset + noise)
             else:
                 points.append(center)
 

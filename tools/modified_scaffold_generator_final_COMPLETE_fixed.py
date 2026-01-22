@@ -214,22 +214,23 @@ class EnhancedScaffoldGeneratorFinal:
         for i in range(num_points):
             t = i / (num_points - 1)
             center = start_pos + t * direction
-            
+
             # Add radial variation for pipe thickness
-            if i % 5 == 0:  # Reduce point density
-                for j in range(8):
-                    angle = j * 2 * np.pi / 8
-                    radius = diameter / 2
-                    # Create perpendicular vectors
-                    if abs(direction_norm[2]) < 0.9:
-                        perp1 = np.cross(direction_norm, np.array([0, 0, 1]))
-                    else:
-                        perp1 = np.cross(direction_norm, np.array([1, 0, 0]))
-                    perp1 = perp1 / np.linalg.norm(perp1)
-                    perp2 = np.cross(direction_norm, perp1)
-                    
-                    offset = radius * (np.cos(angle) * perp1 + np.sin(angle) * perp2)
-                    points.append(center + offset)
+            for j in range(8):
+                angle = j * 2 * np.pi / 8
+                radius = diameter / 2
+                # Create perpendicular vectors
+                if abs(direction_norm[2]) < 0.9:
+                    perp1 = np.cross(direction_norm, np.array([0, 0, 1]))
+                else:
+                    perp1 = np.cross(direction_norm, np.array([1, 0, 0]))
+                perp1 = perp1 / np.linalg.norm(perp1)
+                perp2 = np.cross(direction_norm, perp1)
+
+                offset = radius * (np.cos(angle) * perp1 + np.sin(angle) * perp2)
+                # Add small noise for natural variation
+                noise = np.random.normal(0, 0.005, 3)
+                points.append(center + offset + noise)
         
         return np.array(points)
 
