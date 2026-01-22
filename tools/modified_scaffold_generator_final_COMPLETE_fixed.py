@@ -201,16 +201,21 @@ class EnhancedScaffoldGeneratorFinal:
             return True
         return False
 
-    def generate_pipe_points(self, start_pos: np.ndarray, end_pos: np.ndarray, diameter: float, num_points: int = 50) -> np.ndarray:
+    def generate_pipe_points(self, start_pos: np.ndarray, end_pos: np.ndarray, diameter: float, num_points: int = None) -> np.ndarray:
         """Generate points along a pipe between two positions."""
         direction = end_pos - start_pos
         length = np.linalg.norm(direction)
         if length < 1e-6:
             return np.array([])
-        
+
+        # Calculate num_points based on length for detailed representation
+        if num_points is None:
+            num_points = max(int(length * 100), 10)
+            num_points = min(num_points, 200)
+
         direction_norm = direction / length
         points = []
-        
+
         for i in range(num_points):
             t = i / (num_points - 1)
             center = start_pos + t * direction
@@ -234,8 +239,14 @@ class EnhancedScaffoldGeneratorFinal:
         
         return np.array(points)
 
-    def generate_platform_points(self, center: np.ndarray, width: float, length: float, num_points: int = 100) -> np.ndarray:
+    def generate_platform_points(self, center: np.ndarray, width: float, length: float, num_points: int = None) -> np.ndarray:
         """Generate points for a rectangular platform."""
+        # Calculate num_points based on area for detailed representation
+        if num_points is None:
+            area = width * length
+            num_points = max(int(area * 100), 50)
+            num_points = min(num_points, 500)
+
         points = []
         for i in range(num_points):
             x_offset = random.uniform(-width/2, width/2)
@@ -625,7 +636,7 @@ class EnhancedScaffoldGeneratorFinal:
                 end_pos = np.array([ladder_x + rail_offset, ladder_y, z_top])
                 
                 diameter = ScaffoldSpecs.PIPE_DIAMETERS['handrail']
-                points = self.generate_pipe_points(start_pos, end_pos, diameter, num_points=30)
+                points = self.generate_pipe_points(start_pos, end_pos, diameter)
                 
                 if len(points) > 0:
                     bbox = self.calculate_bbox(points)
@@ -646,8 +657,8 @@ class EnhancedScaffoldGeneratorFinal:
                 rung_z = z_bottom + (z_top - z_bottom) * (rung_idx + 1) / (num_rungs + 1)
                 start_pos = np.array([ladder_x - 0.3, ladder_y, rung_z])
                 end_pos = np.array([ladder_x + 0.3, ladder_y, rung_z])
-                
-                points = self.generate_pipe_points(start_pos, end_pos, diameter, num_points=10)
+
+                points = self.generate_pipe_points(start_pos, end_pos, diameter)
                 
                 if len(points) > 0:
                     bbox = self.calculate_bbox(points)
@@ -760,8 +771,8 @@ class EnhancedScaffoldGeneratorFinal:
                 for bay in range(num_bays):
                     start_pos = np.array([bay * bay_width, y, rail_z])
                     end_pos = np.array([(bay + 1) * bay_width, y, rail_z])
-                    
-                    points = self.generate_pipe_points(start_pos, end_pos, diameter, num_points=20)
+
+                    points = self.generate_pipe_points(start_pos, end_pos, diameter)
                     if len(points) > 0:
                         bbox = self.calculate_bbox(points)
                         comp = ScaffoldComponent(
@@ -779,8 +790,8 @@ class EnhancedScaffoldGeneratorFinal:
             for x in [0, num_bays * bay_width]:
                 start_pos = np.array([x, 0, rail_z])
                 end_pos = np.array([x, depth, rail_z])
-                
-                points = self.generate_pipe_points(start_pos, end_pos, diameter, num_points=20)
+
+                points = self.generate_pipe_points(start_pos, end_pos, diameter)
                 if len(points) > 0:
                     bbox = self.calculate_bbox(points)
                     comp = ScaffoldComponent(
