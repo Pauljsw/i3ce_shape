@@ -183,21 +183,25 @@ class EnhancedScaffoldGeneratorFinal:
         # 🆕 Global missing quota system
         self.missing_quota = 4  # Maximum total missing components
         self.current_missing_count = 0  # Current count of missing components
+        self.current_missing_by_type: Dict[str, int] = defaultdict(int)
         
         self.instance_counter = 1
 
     def reset_missing_quota(self) -> None:
         """Reset missing component counter for new scene generation."""
         self.current_missing_count = 0
+        self.current_missing_by_type = defaultdict(int)
 
     def can_add_missing_component(self) -> bool:
         """Check if we can add another missing component within quota."""
         return self.current_missing_count < self.missing_quota
 
-    def add_missing_component(self) -> bool:
+    def add_missing_component(self, defect_type: Optional[str] = None) -> bool:
         """Try to add a missing component. Returns True if successful."""
         if self.can_add_missing_component():
             self.current_missing_count += 1
+            if defect_type:
+                self.current_missing_by_type[defect_type] += 1
             return True
         return False
 
@@ -340,7 +344,13 @@ class EnhancedScaffoldGeneratorFinal:
             # Calculate how many should be missing
             num_candidates = int(len(all_verticals) * base_missing_rate)
             # Limit by quota
-            num_to_remove = min(num_candidates, self.missing_quota - self.current_missing_count)
+            type_quota = config.get('missing_type_quota', {}).get('missing_vertical', self.missing_quota)
+            remaining_type_quota = max(type_quota - self.current_missing_by_type['missing_vertical'], 0)
+            num_to_remove = min(
+                num_candidates,
+                remaining_type_quota,
+                self.missing_quota - self.current_missing_count
+            )
 
             if num_to_remove > 0:
                 # RANDOMIZE: shuffle and pick first N
@@ -376,7 +386,7 @@ class EnhancedScaffoldGeneratorFinal:
                             'floor': 'all'
                         }
                     )
-                    self.add_missing_component()
+                    self.add_missing_component('missing_vertical')
                     violations.append(f"Missing vertical post at column {col}, row {row}")
 
         components.extend(all_verticals)
@@ -459,7 +469,13 @@ class EnhancedScaffoldGeneratorFinal:
         # Step 2: RANDOMLY select some to convert to missing markers
         if base_missing_rate > 0 and len(all_horizontals) > 0:
             num_candidates = int(len(all_horizontals) * base_missing_rate)
-            num_to_remove = min(num_candidates, self.missing_quota - self.current_missing_count)
+            type_quota = config.get('missing_type_quota', {}).get('missing_horizontal', self.missing_quota)
+            remaining_type_quota = max(type_quota - self.current_missing_by_type['missing_horizontal'], 0)
+            num_to_remove = min(
+                num_candidates,
+                remaining_type_quota,
+                self.missing_quota - self.current_missing_count
+            )
 
             if num_to_remove > 0:
                 # RANDOMIZE: shuffle and pick first N
@@ -505,7 +521,7 @@ class EnhancedScaffoldGeneratorFinal:
                             **{k: v for k, v in comp.metadata.items() if k in ['bay', 'column', 'side']}
                         }
                     )
-                    self.add_missing_component()
+                    self.add_missing_component('missing_horizontal')
                     violations.append(violation_msg)
 
         components.extend(all_horizontals)
@@ -566,7 +582,13 @@ class EnhancedScaffoldGeneratorFinal:
         # Step 2: RANDOMLY select some to convert to missing markers
         if base_missing_rate > 0 and len(all_platforms) > 0:
             num_candidates = int(len(all_platforms) * base_missing_rate)
-            num_to_remove = min(num_candidates, self.missing_quota - self.current_missing_count)
+            type_quota = config.get('missing_type_quota', {}).get('missing_platform', self.missing_quota)
+            remaining_type_quota = max(type_quota - self.current_missing_by_type['missing_platform'], 0)
+            num_to_remove = min(
+                num_candidates,
+                remaining_type_quota,
+                self.missing_quota - self.current_missing_count
+            )
 
             if num_to_remove > 0:
                 # RANDOMIZE: shuffle and pick first N
@@ -601,7 +623,7 @@ class EnhancedScaffoldGeneratorFinal:
                             'bay': bay
                         }
                     )
-                    self.add_missing_component()
+                    self.add_missing_component('missing_platform')
                     violations.append(f"Missing platform at floor {floor_idx}, bay {bay}")
 
         components.extend(all_platforms)
@@ -1210,14 +1232,26 @@ class EnhancedScaffoldGeneratorFinal:
         self.instance_counter = 1
 
         # Scene configuration
+        safety_status = random.choices(
+            ['safe', 'minor_defect', 'major_defect'],
+            weights=[0.4, 0.3, 0.3]
+        )[0]
+
         config = {
             'num_bays': random.randint(2, 4),
             'bay_width': random.uniform(1.5, 2.0),
             'depth': random.uniform(1.2, 1.8),
             'num_floors': random.randint(2, 4),
             'floor_height': random.uniform(1.8, 2.2),
-            'safety_status': random.choice(['safe', 'minor_defect', 'major_defect'])
+            'safety_status': safety_status
         }
+
+        if safety_status != 'safe':
+            config['missing_type_quota'] = {
+                'missing_vertical': 1,
+                'missing_horizontal': 2,
+                'missing_platform': 1
+            }
 
         num_bays = config['num_bays']
         bay_width = config['bay_width']
